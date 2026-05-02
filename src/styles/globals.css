@@ -1,0 +1,57 @@
+/* Brand color palette and global polish for "Интеллекта" */
+:root {
+  --brand-navy: #1A2B3C;
+  --brand-charcoal: #2D2D2D;
+  --brand-slate: #4A5F7A;
+  --brand-cream: #FDFBF7;
+  --brand-beige: #E8E4DC;
+  --brand-gray: #8E8E8E;
+  --brand-light-gray: #D4D4D4;
+  --brand-dark-slate: #3D4F5C;
+}
+
+html, body, #root {
+  background: var(--brand-cream);
+  color: var(--brand-charcoal);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+
+.font-serif { font-family: var(--font-serif); }
+.font-sans { font-family: var(--font-sans); }
+
+/* Accessible focus rings */
+:where(a, button, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid var(--brand-navy);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+button { transition: background-color .18s ease, color .18s ease, transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+
+.book-card { transition: box-shadow .25s ease, transform .25s ease, border-color .25s ease; }
+@media (hover: hover) {
+  .book-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 28px rgba(26,43,60,0.10);
+    border-color: var(--brand-light-gray);
+  }
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--brand-light-gray);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+/* utility */
+.text-balance { text-wrap: balance; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.fade-in { animation: fadeIn .25s ease both; }

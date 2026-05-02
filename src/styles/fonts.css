@@ -1,0 +1,5 @@
+/* Brand typography for "Интеллекта" */
+:root {
+  --font-serif: Georgia, "Times New Roman", "Iowan Old Style", serif;
+  --font-sans: "Helvetica Neue", Helvetica, Arial, "Segoe UI", system-ui, sans-serif;
+}
