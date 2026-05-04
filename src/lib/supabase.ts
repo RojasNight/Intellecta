@@ -9,7 +9,9 @@ export function getSupabaseConfig() {
 
   const anonKey =
     import.meta.env.VITE_SUPABASE_ANON_KEY ||
-    import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   return {
     url,
@@ -52,12 +54,18 @@ export function getSupabaseClient() {
     console.error("[Интеллекта][supabase] Supabase не настроен", {
       urlPresent,
       anonKeyPresent,
-      expectedVariables: ["VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY"],
-      note: "Для Vite переменные должны начинаться с VITE_. Ключи в консоль не выводятся.",
+      expectedVariables: [
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+      ],
+      note: "В Vite дополнительно разрешен префикс NEXT_PUBLIC_ через vite.config.ts. Ключи в консоль не выводятся.",
     });
 
     throw new Error(
-      "Supabase is not configured. For Vite, add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
+      "Supabase is not configured. For Vite, add VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY or NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY."
     );
   }
 

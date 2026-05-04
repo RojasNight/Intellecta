@@ -9,6 +9,6 @@ export function getSupabaseHealth() {
     anonKeyPresent: Boolean(config.anonKey),
     message: config.configured
       ? "Supabase настроен"
-      : "Supabase не настроен: проверьте VITE_SUPABASE_URL и VITE_SUPABASE_ANON_KEY",
+      : "Supabase не настроен: проверьте VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY или NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY",
   };
 }

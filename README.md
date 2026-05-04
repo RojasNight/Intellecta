@@ -220,3 +220,21 @@ VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 После изменения переменных окружения в Vercel обязательно выполните новый деплой без кеша.
 
 Для React Router SPA на Vercel используется файл `vercel.json`, который направляет все маршруты на `index.html`.
+
+
+### Переменные Supabase из Vercel Integration
+
+В этом проекте Vite настроен так, чтобы читать публичные переменные с префиксами `VITE_` и `NEXT_PUBLIC_`. Поэтому текущие переменные Vercel Integration подходят, если в проекте есть:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+```
+
+Также поддерживается новый публичный ключ Supabase:
+
+```env
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+```
+
+Серверные переменные без публичного префикса, например `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `POSTGRES_URL`, не используются во frontend и не должны попадать в браузерный код. После изменения переменных на Vercel нужно выполнить Redeploy без build cache.

@@ -31,6 +31,11 @@ export default defineConfig({
     },
   },
 
+  // Vercel Supabase Integration may create NEXT_PUBLIC_* variables.
+  // Vite exposes only env variables matching envPrefix to browser code.
+  // Do NOT add SUPABASE_ here because that could expose secret/server keys.
+  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
+
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
 })
