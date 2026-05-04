@@ -5,6 +5,7 @@ import { BRAND } from "./brand";
 import { ADMIN_ORDERS, BOOKS, GENRES } from "./data";
 import type { Book, Order } from "./types";
 import { Breadcrumbs, EmptyState, GhostButton, Notice, PrimaryButton, SectionTitle, StatusBadge } from "./shared";
+import { SupabaseStatus } from "./SupabaseStatus";
 
 type AdminTab = "overview" | "books" | "orders" | "ai" | "logs";
 
@@ -107,7 +108,9 @@ function Overview({ books, orders, go }: { books: Book[]; orders: Order[]; go: (
   return (
     <div>
       <SectionTitle sub="Сводка по каталогу и работе ИИ-анализа">Обзор</SectionTitle>
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
+      <SupabaseStatus />
+
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5 mt-5">
         <Metric icon={<BookOpen size={16} />} label="Всего книг" value={total} onClick={() => go("books")} />
         <Metric icon={<Layout size={16} />} label="Активные книги" value={active} tone="ok" onClick={() => go("books")} />
         <Metric icon={<Sparkles size={16} />} label="С ИИ-профилем" value={aiReady} tone="info" onClick={() => go("ai")} />
