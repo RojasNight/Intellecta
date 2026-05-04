@@ -15,7 +15,30 @@ export function getSupabaseConfig() {
     url,
     anonKey,
     configured: Boolean(url && anonKey),
+    urlPresent: Boolean(url),
+    anonKeyPresent: Boolean(anonKey),
   };
+}
+
+export function logSupabaseConfigState(source = "supabase") {
+  const config = getSupabaseConfig();
+  console.info(`[Интеллекта][${source}] Supabase config`, {
+    configured: config.configured,
+    urlPresent: config.urlPresent,
+    anonKeyPresent: config.anonKeyPresent,
+    urlHost: config.url ? safeUrlHost(config.url) : null,
+    mode: import.meta.env.MODE,
+    dev: import.meta.env.DEV,
+    prod: import.meta.env.PROD,
+  });
+}
+
+function safeUrlHost(value: string) {
+  try {
+    return new URL(value).host;
+  } catch {
+    return "Некорректный URL";
+  }
 }
 
 export function isSupabaseConfigured() {
@@ -23,15 +46,26 @@ export function isSupabaseConfigured() {
 }
 
 export function getSupabaseClient() {
-  const { url, anonKey, configured } = getSupabaseConfig();
+  const { url, anonKey, configured, urlPresent, anonKeyPresent } = getSupabaseConfig();
 
   if (!configured || !url || !anonKey) {
+    console.error("[Интеллекта][supabase] Supabase не настроен", {
+      urlPresent,
+      anonKeyPresent,
+      expectedVariables: ["VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY"],
+      note: "Для Vite переменные должны начинаться с VITE_. Ключи в консоль не выводятся.",
+    });
+
     throw new Error(
       "Supabase is not configured. For Vite, add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
     );
   }
 
   if (!client) {
+    console.info("[Интеллекта][supabase] Создаем Supabase client", {
+      urlHost: safeUrlHost(url),
+      anonKeyPresent: true,
+    });
     client = createClient(url, anonKey);
   }
 

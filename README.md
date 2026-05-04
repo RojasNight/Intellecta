@@ -198,3 +198,25 @@ Vercel Integration уже подключена, но для Vite в браузе
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
 ```
+
+## Диагностика Supabase Auth на Vercel
+
+Если регистрация или вход показывают сообщение «Не удалось подключиться к сервису авторизации», откройте DevTools → Console и Network.
+
+В Console приложение выводит безопасные диагностические сообщения с префиксами:
+
+- `[Интеллекта][supabase]`
+- `[Интеллекта][auth]`
+
+В логах показываются только безопасные признаки: наличие URL, наличие anon key, host Supabase URL, статус ошибки и код ошибки. Значения ключей, JWT и service role key не выводятся.
+
+Для Vite на Vercel должны быть доступны переменные:
+
+```env
+VITE_SUPABASE_URL=https://your-project-id.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+```
+
+После изменения переменных окружения в Vercel обязательно выполните новый деплой без кеша.
+
+Для React Router SPA на Vercel используется файл `vercel.json`, который направляет все маршруты на `index.html`.
