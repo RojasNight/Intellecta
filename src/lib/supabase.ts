@@ -25,7 +25,7 @@ export function isSupabaseConfigured() {
 export function getSupabaseClient() {
   const { url, anonKey, configured } = getSupabaseConfig();
 
-  if (!configured) {
+  if (!configured || !url || !anonKey) {
     throw new Error(
       "Supabase is not configured. For Vite, add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
     );

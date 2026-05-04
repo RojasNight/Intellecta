@@ -5,12 +5,14 @@ import { toast } from "sonner";
 import { BRAND } from "./brand";
 import { GENRES, GOALS, TOPICS } from "./data";
 import { useAppContext } from "./Root";
+import { useAuth } from "../auth/AuthContext";
 import type { Preferences } from "./types";
 import { PrimaryButton } from "./shared";
 
 export function PreferencesPage() {
   const navigate = useNavigate();
   const { preferences, setPreferences } = useAppContext();
+  const { profile } = useAuth();
   const [step, setStep] = useState(0);
   const [genres, setGenres] = useState<string[]>(preferences?.genres ?? []);
   const [topics, setTopics] = useState<string[]>(preferences?.topics ?? []);
@@ -27,6 +29,7 @@ export function PreferencesPage() {
   ];
 
   const save = () => {
+    // TODO: Stage 10 - save preferences to Supabase user_preferences for profile?.id.
     setPreferences({ genres, topics, goals, complexityMin: cMin, complexityMax: cMax, excludedGenres: excluded });
     toast.success("Предпочтения сохранены");
     navigate("/recommendations");
@@ -42,6 +45,7 @@ export function PreferencesPage() {
       </h1>
       <p style={{ color: BRAND.slate, marginTop: 6, lineHeight: 1.6 }}>
         Это поможет объяснять рекомендации точнее. Можно изменить позже в профиле.
+        {profile?.email ? ` Аккаунт: ${profile.email}.` : ""}
       </p>
       <div
         className="mt-4 h-1.5 rounded-full overflow-hidden"

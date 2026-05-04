@@ -38,7 +38,7 @@ npm run preview
 
 ## Supabase
 
-Supabase подключен к Vercel через **Vercel Integrations**, но на этом этапе основные данные приложения остаются mock-данными. Каталог, авторизация, корзина, заказы, рекомендации и админские сценарии будут переноситься на Supabase на следующих этапах.
+Supabase подключен к Vercel через **Vercel Integrations**. После Stage 6 авторизация работает через Supabase Auth, а каталог, корзина, заказы, рекомендации и админские сценарии пока остаются mock-данными и будут переноситься на Supabase на следующих этапах.
 
 Откройте **Vercel Project Settings → Environment Variables** и проверьте, какие переменные были созданы интеграцией Supabase.
 
@@ -110,6 +110,26 @@ supabase/sql/00_connection_check.sql
 
 Он проверяет, что SQL Editor выполняет запросы, и не создает таблицы.
 
+
+## База данных Supabase / Stage 5
+
+Схема базы данных для MVP находится в папке:
+
+```text
+supabase/sql/
+```
+
+Все изменения БД выполняются через **Supabase SQL Editor**, а не ручным созданием таблиц через UI. Для Stage 5 подготовлены скрипты:
+
+1. `00_connection_check.sql` — проверка SQL Editor;
+2. `01_schema.sql` — таблицы, связи, ограничения и представление каталога;
+3. `02_indexes.sql` — индексы;
+4. `03_triggers.sql` — `updated_at` и создание профиля после Supabase Auth-регистрации;
+5. `04_rls_prepare.sql` — подготовка к RLS и функция `public.is_admin()`;
+6. `99_verify_schema.sql` — проверка созданной схемы.
+
+После Stage 6 frontend использует Supabase Auth для регистрации, входа, выхода и определения роли. Каталог, корзина, заказы, рекомендации и админские данные пока остаются mock-данными и будут переноситься на Supabase на следующих этапах.
+
 ## Статус Supabase в разработке
 
 Компонент `SupabaseStatus` предназначен только для режима разработки. Он показывает только безопасное состояние конфигурации:
@@ -132,3 +152,49 @@ supabase/sql/00_connection_check.sql
 - `.env.development.local`
 - `.env.test.local`
 - `.env.production.local`
+
+## Supabase Auth и роли / Stage 6
+
+В Stage 6 проект использует **Supabase Auth email/password** для регистрации, входа и выхода. Роли приложения хранятся не в frontend-коде, а в таблице `public.profiles`.
+
+Роли:
+
+- `guest` — неавторизованный посетитель;
+- `user` — обычный пользователь;
+- `admin` — администратор.
+
+Новые пользователи автоматически получают профиль в `public.profiles` и роль `user`. Это делает SQL-триггер `public.handle_new_user()` после регистрации в `auth.users`.
+
+Для Stage 6 выполните SQL-скрипты в Supabase SQL Editor:
+
+1. `supabase/sql/05_auth_roles.sql`
+2. `supabase/sql/07_auth_rls.sql`
+3. при необходимости `supabase/sql/08_catalog_view_security.sql`;
+4. зарегистрируйте пользователя через приложение;
+5. при необходимости назначьте администратора через `supabase/sql/06_set_admin_example.sql`.
+
+### Как создать первого администратора
+
+1. Зарегистрируйтесь через страницу регистрации приложения.
+2. Откройте Supabase Dashboard → SQL Editor.
+3. Откройте `supabase/sql/06_set_admin_example.sql`.
+4. Замените `admin@example.com` на email зарегистрированного пользователя.
+5. Выполните скрипт.
+6. Выйдите из приложения и войдите снова.
+
+Назначение роли администратора выполняется только через SQL Editor или защищенный backend. В публичном интерфейсе приложения нет инструкций, паролей или обходных способов получить роль администратора.
+
+### Безопасность Auth
+
+- Не используйте `SUPABASE_SERVICE_ROLE_KEY` во frontend-коде.
+- Не коммитьте реальные `.env`-файлы, токены и ключи.
+- Не показывайте JWT/session token в UI и логах.
+- Проверка admin-доступа выполняется по `public.profiles.role`, а не по email-префиксу.
+- Базовые RLS-политики для `profiles` и `user_preferences` находятся в `07_auth_rls.sql`.
+
+Vercel Integration уже подключена, но для Vite в браузере должны быть доступны переменные с префиксом `VITE_`:
+
+```env
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+```

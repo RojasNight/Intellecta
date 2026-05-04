@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { createBrowserRouter } from "react-router";
+import { Navigate, createBrowserRouter, useLocation } from "react-router";
 import { Root } from "./components/Root";
 import { HomePage } from "./components/HomePage";
 import { CatalogPage } from "./components/CatalogPage";
@@ -11,7 +11,8 @@ import { RecommendationsPage } from "./components/RecommendationsPage";
 import { FavoritesPage, CartPage, CheckoutPage, OrdersPage } from "./components/CartFavCheckoutPages";
 import { AdminPage } from "./components/AdminPage";
 import { ErrorPage } from "./components/ErrorPages";
-import { useAppContext } from "./components/Root";
+import { useAuth } from "./auth/AuthContext";
+import { BRAND } from "./components/brand";
 
 function ProtectedRoute({
   children,
@@ -20,13 +21,27 @@ function ProtectedRoute({
   children: ReactNode;
   roles?: Array<"user" | "admin">;
 }) {
-  const { user } = useAppContext();
+  const location = useLocation();
+  const { loading, isAuthenticated, role } = useAuth();
 
-  if (!user) {
-    return <ErrorPage code={401} />;
+  if (loading) {
+    return (
+      <main className="max-w-2xl mx-auto px-4 md:px-8 py-16 text-center fade-in">
+        <div className="font-serif" style={{ color: BRAND.navy, fontSize: 28 }}>
+          Проверяем авторизацию…
+        </div>
+        <p style={{ color: BRAND.slate, marginTop: 8 }}>
+          Это займет несколько секунд.
+        </p>
+      </main>
+    );
   }
 
-  if (roles && !roles.includes(user.role)) {
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (roles && !roles.includes(role as "user" | "admin")) {
     return <ErrorPage code={403} />;
   }
 

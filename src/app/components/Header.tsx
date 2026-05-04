@@ -8,18 +8,23 @@ interface Props {
   favCount: number;
   isAuthed: boolean;
   isAdmin: boolean;
+  accountLabel?: string;
   onLogout: () => void;
 }
 
-export function Header({ cartCount, favCount, isAuthed, isAdmin, onLogout }: Props) {
+export function Header({ cartCount, favCount, isAuthed, isAdmin, accountLabel, onLogout }: Props) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
   const navItems: { label: string; path: string }[] = [
     { label: "Каталог", path: "/catalog" },
-    { label: "Рекомендации", path: "/recommendations" },
-    { label: "Избранное", path: "/favorites" },
+    ...(isAuthed
+      ? [
+          { label: "Рекомендации", path: "/recommendations" },
+          { label: "Избранное", path: "/favorites" },
+        ]
+      : []),
   ];
 
   const linkClass = (path: string) =>
@@ -88,10 +93,14 @@ export function Header({ cartCount, favCount, isAuthed, isAdmin, onLogout }: Pro
             <div className="hidden md:flex items-center gap-2">
               <button
                 onClick={() => navigate("/preferences")}
-                className="p-2"
+                className="p-2 inline-flex items-center gap-2"
                 aria-label="Профиль"
+                title={accountLabel}
               >
                 <User2 size={20} />
+                <span className="hidden xl:inline text-sm" style={{ color: BRAND.slate }}>
+                  {accountLabel}
+                </span>
               </button>
               <button
                 onClick={onLogout}
@@ -102,13 +111,22 @@ export function Header({ cartCount, favCount, isAuthed, isAdmin, onLogout }: Pro
               </button>
             </div>
           ) : (
-            <button
-              onClick={() => navigate("/login")}
-              className="hidden md:inline-flex items-center gap-2 px-4 py-2 rounded-full"
-              style={{ background: BRAND.navy, color: "white" }}
-            >
-              Войти
-            </button>
+            <div className="hidden md:flex items-center gap-2">
+              <button
+                onClick={() => navigate("/login")}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full"
+                style={{ background: BRAND.navy, color: "white" }}
+              >
+                Войти
+              </button>
+              <button
+                onClick={() => navigate("/register")}
+                className="text-sm px-2"
+                style={{ color: BRAND.slate }}
+              >
+                Регистрация
+              </button>
+            </div>
           )}
           <button
             className="md:hidden p-2"
@@ -145,6 +163,7 @@ export function Header({ cartCount, favCount, isAuthed, isAdmin, onLogout }: Pro
               { label: "Корзина", path: "/cart" },
               ...(isAuthed
                 ? [
+                    { label: `Профиль${accountLabel ? `: ${accountLabel}` : ""}`, path: "/preferences" },
                     { label: "Мои заказы", path: "/orders" },
                     { label: "Предпочтения", path: "/preferences" },
                   ]

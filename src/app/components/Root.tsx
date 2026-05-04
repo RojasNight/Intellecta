@@ -2,13 +2,13 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { Toaster, toast } from "sonner";
 import { Header } from "./Header";
+import { useAuth } from "../auth/AuthContext";
 import { Footer } from "./Footer";
 import { BOOKS, DEMO_ORDERS } from "./data";
 import type { CartItem, Order, Preferences, User } from "./types";
 
 interface AppContextValue {
   user: User | null;
-  setUser: (user: User | null) => void;
   favorites: string[];
   toggleFav: (id: string) => void;
   cart: CartItem[];
@@ -34,7 +34,6 @@ export const useAppContext = () => {
 };
 
 export function Root() {
-  const [user, setUser] = useState<User | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
@@ -44,14 +43,15 @@ export function Root() {
 
   const location = useLocation();
   const navigate = useNavigate();
+  const { profile, isAuthenticated, isAdmin, signOut } = useAuth();
+
+  const user: User | null = profile
+    ? { id: profile.id, name: profile.name, email: profile.email, role: profile.role }
+    : null;
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [location.pathname]);
-
-  const handleSetUser = (u: User | null) => {
-    setUser(u);
-  };
 
   const toggleFav = (id: string) => {
     const was = favorites.includes(id);
@@ -88,7 +88,6 @@ export function Root() {
 
   const contextValue: AppContextValue = {
     user,
-    setUser,
     favorites,
     toggleFav,
     cart,
@@ -111,12 +110,17 @@ export function Root() {
         <Header
           cartCount={cartCount}
           favCount={favorites.length}
-          isAuthed={!!user}
-          isAdmin={user?.role === "admin"}
-          onLogout={() => {
-            setUser(null);
-            navigate("/");
-            toast.success("Вы вышли из аккаунта");
+          isAuthed={isAuthenticated}
+          isAdmin={isAdmin}
+          accountLabel={profile?.name || profile?.email}
+          onLogout={async () => {
+            try {
+              await signOut();
+              navigate("/");
+              toast.success("Вы вышли из аккаунта");
+            } catch {
+              toast.error("Не удалось выйти из аккаунта");
+            }
           }}
         />
         <div className="flex-1">
