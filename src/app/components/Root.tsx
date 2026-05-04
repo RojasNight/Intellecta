@@ -15,6 +15,7 @@ interface AppContextValue {
   addToCart: (id: string) => void;
   setQty: (id: string, qty: number) => void;
   removeItem: (id: string) => void;
+  clearCart: () => void;
   preferences: Preferences | null;
   setPreferences: (p: Preferences) => void;
   orders: Order[];
@@ -81,6 +82,8 @@ export function Root() {
   const removeItem = (id: string) =>
     setCart((s) => s.filter((x) => x.bookId !== id));
 
+  const clearCart = () => setCart([]);
+
   const cartCount = cart.reduce((n, x) => n + x.qty, 0);
 
   const contextValue: AppContextValue = {
@@ -92,6 +95,7 @@ export function Root() {
     addToCart,
     setQty,
     removeItem,
+    clearCart,
     preferences,
     setPreferences,
     orders,

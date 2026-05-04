@@ -1,5 +1,5 @@
 import { Lock, ShieldAlert, SearchX, AlertTriangle } from "lucide-react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { BRAND } from "./brand";
 import { GhostButton, PrimaryButton } from "./shared";
 
@@ -10,6 +10,7 @@ interface Props {
 
 export function ErrorPage({ code, reason }: Props) {
   const navigate = useNavigate();
+  const location = useLocation();
   const traceId = "trace_" + Math.random().toString(36).slice(2, 10);
 
   const block = (() => {
@@ -20,8 +21,8 @@ export function ErrorPage({ code, reason }: Props) {
         text: "Войдите в аккаунт, чтобы продолжить покупку, сохранить избранное и получить персональные рекомендации.",
         actions: (
           <>
-            <PrimaryButton onClick={() => navigate("/login")}>Войти</PrimaryButton>
-            <GhostButton onClick={() => navigate("/register")}>Зарегистрироваться</GhostButton>
+            <PrimaryButton onClick={() => navigate("/login", { state: { from: location } })}>Войти</PrimaryButton>
+            <GhostButton onClick={() => navigate("/register", { state: { from: location } })}>Зарегистрироваться</GhostButton>
           </>
         ),
       };

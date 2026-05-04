@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { createBrowserRouter } from "react-router";
 import { Root } from "./components/Root";
 import { HomePage } from "./components/HomePage";
@@ -10,6 +11,27 @@ import { RecommendationsPage } from "./components/RecommendationsPage";
 import { FavoritesPage, CartPage, CheckoutPage, OrdersPage } from "./components/CartFavCheckoutPages";
 import { AdminPage } from "./components/AdminPage";
 import { ErrorPage } from "./components/ErrorPages";
+import { useAppContext } from "./components/Root";
+
+function ProtectedRoute({
+  children,
+  roles,
+}: {
+  children: ReactNode;
+  roles?: Array<"user" | "admin">;
+}) {
+  const { user } = useAppContext();
+
+  if (!user) {
+    return <ErrorPage code={401} />;
+  }
+
+  if (roles && !roles.includes(user.role)) {
+    return <ErrorPage code={403} />;
+  }
+
+  return <>{children}</>;
+}
 
 export const router = createBrowserRouter([
   {
@@ -42,15 +64,15 @@ export const router = createBrowserRouter([
       },
       {
         path: "preferences",
-        Component: PreferencesPage,
+        element: <ProtectedRoute><PreferencesPage /></ProtectedRoute>,
       },
       {
         path: "recommendations",
-        Component: RecommendationsPage,
+        element: <ProtectedRoute><RecommendationsPage /></ProtectedRoute>,
       },
       {
         path: "favorites",
-        Component: FavoritesPage,
+        element: <ProtectedRoute><FavoritesPage /></ProtectedRoute>,
       },
       {
         path: "cart",
@@ -58,15 +80,15 @@ export const router = createBrowserRouter([
       },
       {
         path: "checkout",
-        Component: CheckoutPage,
+        element: <ProtectedRoute><CheckoutPage /></ProtectedRoute>,
       },
       {
         path: "orders",
-        Component: OrdersPage,
+        element: <ProtectedRoute><OrdersPage /></ProtectedRoute>,
       },
       {
         path: "admin",
-        Component: AdminPage,
+        element: <ProtectedRoute roles={["admin"]}><AdminPage /></ProtectedRoute>,
       },
       {
         path: "401",

@@ -6,7 +6,7 @@ import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { BRAND } from "./brand";
 import { BOOKS } from "./data";
 import { useAppContext } from "./Root";
-import type { Book, CartItem, Order } from "./types";
+import type { Order } from "./types";
 import { EmptyState, GhostButton, Notice, PrimaryButton, SectionTitle, SemanticBadge, StatusBadge } from "./shared";
 
 /* ---------- FAVORITES ---------- */
@@ -231,7 +231,7 @@ function Stepper({ qty, onChange, max = 99 }: { qty: number; onChange: (n: numbe
 
 export function CheckoutPage() {
   const navigate = useNavigate();
-  const { cart, setOrders, user } = useAppContext();
+  const { cart, setOrders, user, clearCart } = useAppContext();
   const prefill = { name: user?.name, email: user?.email };
 
   const items = cart.map((c) => ({ ...c, book: BOOKS.find((b) => b.id === c.bookId)! })).filter((x) => x.book);
@@ -266,6 +266,7 @@ export function CheckoutPage() {
     };
     setOrders((prev) => [order, ...prev]);
     setCreatedOrder(order);
+    clearCart();
     toast.success("Заказ успешно создан!");
   };
 
@@ -318,6 +319,20 @@ export function CheckoutPage() {
             <GhostButton onClick={() => navigate("/catalog")}>Продолжить покупки</GhostButton>
           </div>
         </div>
+      </main>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <main className="max-w-3xl mx-auto px-4 md:px-8 py-10 fade-in">
+        <SectionTitle>Оформление заказа</SectionTitle>
+        <EmptyState
+          icon={<ShoppingBag size={22} />}
+          title="Корзина пуста"
+          text="Добавьте книги в корзину перед оформлением заказа."
+          action={<PrimaryButton onClick={() => navigate("/catalog")}>Перейти в каталог</PrimaryButton>}
+        />
       </main>
     );
   }

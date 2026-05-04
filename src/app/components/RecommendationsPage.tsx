@@ -5,7 +5,7 @@ import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { BRAND } from "./brand";
 import { BOOKS, GOALS, RECOMMENDATIONS, TOPICS } from "./data";
 import { useAppContext } from "./Root";
-import type { Complexity } from "./types";
+import type { Book, Complexity } from "./types";
 import { GhostButton, Notice, PrimaryButton, SectionTitle, SemanticBadge, ScoreBadge, BookCard } from "./shared";
 
 const COMPLEXITIES: Complexity[] = ["Лёгкий", "Средний", "Сложный", "Профессиональный"];

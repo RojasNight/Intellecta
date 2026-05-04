@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { BRAND } from "./brand";
 import { useAppContext } from "./Root";
@@ -11,6 +11,7 @@ interface Props {
 
 export function AuthPage({ mode }: Props) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { setUser } = useAppContext();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -46,6 +47,12 @@ export function AuthPage({ mode }: Props) {
     };
     setUser(user);
     toast.success(mode === "login" ? `Вы вошли как ${user.name}` : "Регистрация прошла успешно");
+
+    const fromState = location.state as { from?: { pathname?: string; search?: string } } | null;
+    const returnPath = fromState?.from?.pathname
+      ? `${fromState.from.pathname}${fromState.from.search ?? ""}`
+      : null;
+    navigate(returnPath || (mode === "register" ? "/preferences" : "/recommendations"), { replace: true });
   };
 
   return (
@@ -140,7 +147,7 @@ export function AuthPage({ mode }: Props) {
 
       <div className="mt-4">
         <Notice tone="info">
-          Демо-режим: данные используются только для демонстрации интерфейса и не передаются на сервер.
+          Демо-режим: данные используются только для демонстрации интерфейса.
         </Notice>
       </div>
     </main>

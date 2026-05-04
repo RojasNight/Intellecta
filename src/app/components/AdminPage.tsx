@@ -1,10 +1,8 @@
-import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { BookOpen, ClipboardList, FileText, Layout, LayoutDashboard, Pencil, Play, Plus, RefreshCw, Sparkles, Trash2, AlertTriangle, ShieldAlert, Lock } from "lucide-react";
+import { BookOpen, ClipboardList, FileText, Layout, LayoutDashboard, Pencil, Play, Plus, RefreshCw, Sparkles, Trash2, AlertTriangle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { BRAND } from "./brand";
 import { ADMIN_ORDERS, BOOKS, GENRES } from "./data";
-import { useAppContext } from "./Root";
 import type { Book, Order } from "./types";
 import { Breadcrumbs, EmptyState, GhostButton, Notice, PrimaryButton, SectionTitle, StatusBadge } from "./shared";
 
@@ -19,39 +17,12 @@ const NAV: { v: AdminTab; label: string; icon: React.ReactNode }[] = [
 ];
 
 export function AdminPage() {
-  const navigate = useNavigate();
-  const { user } = useAppContext();
-
-  if (!user) {
-    return (
-      <main className="max-w-3xl mx-auto px-4 md:px-8 py-16 fade-in">
-        <EmptyState
-          icon={<Lock size={22} />}
-          title="Требуется авторизация"
-          text="Войдите в аккаунт администратора, чтобы получить доступ к панели управления."
-          action={<PrimaryButton onClick={() => navigate("/login")}>Войти</PrimaryButton>}
-        />
-      </main>
-    );
-  }
-
-  if (user.role !== "admin") {
-    return (
-      <main className="max-w-3xl mx-auto px-4 md:px-8 py-16 fade-in">
-        <EmptyState
-          icon={<ShieldAlert size={22} />}
-          title="Недостаточно прав"
-          text="Этот раздел доступен только администраторам. Войдите с правами администратора (email должен начинаться с 'admin')."
-          action={<PrimaryButton onClick={() => navigate("/")}>На главную</PrimaryButton>}
-        />
-      </main>
-    );
-  }
   const [tab, setTab] = useState<AdminTab>("overview");
   const [books, setBooks] = useState<Book[]>(BOOKS);
   const [orders, setOrders] = useState<Order[]>(ADMIN_ORDERS);
   const [editing, setEditing] = useState<Book | null>(null);
   const [creating, setCreating] = useState(false);
+  const onToast = (message: string) => toast.success(message);
 
   return (
     <main className="max-w-[1240px] mx-auto px-4 md:px-8 py-6 md:py-8 fade-in">
