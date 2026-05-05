@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import {
@@ -34,7 +34,7 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [profile, setProfile] = useState<AppProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,15 +81,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         subscription = onAuthStateChange((_event, nextSession) => {
           const nextUser = nextSession?.user ?? null;
+
+          setLoading(true);
           setUser(nextUser);
+
           if (!nextUser) {
             setProfile(null);
+            setError(null);
+            setLoading(false);
             return;
           }
 
           getCurrentProfile(nextUser.id)
-            .then((nextProfile) => setProfile(nextProfile))
-            .catch((err) => setError(getAuthErrorMessage(err)));
+            .then((nextProfile) => {
+              setProfile(nextProfile);
+              setError(null);
+            })
+            .catch((err) => {
+              setProfile(null);
+              setError(getAuthErrorMessage(err));
+            })
+            .finally(() => setLoading(false));
         });
       } catch (err) {
         if (mounted) {

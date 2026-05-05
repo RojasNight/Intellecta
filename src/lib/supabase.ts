@@ -107,15 +107,6 @@ export function getSupabaseClient(): SupabaseClient {
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },
-      // Supabase JS usually adds these headers automatically. They are also
-      // specified explicitly so the request never reaches Supabase without
-      // apikey/Authorization if a bundler or environment edge case occurs.
-      global: {
-        headers: {
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-        },
-      },
     });
   }
 
