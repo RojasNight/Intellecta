@@ -1,89 +1,46 @@
-# SQL-скрипты Supabase
+# SQL-скрипты Supabase для «Интеллекта»
 
-Здесь находятся SQL-скрипты для **Supabase SQL Editor** проекта «Интеллекта».
+Все изменения базы данных выполняйте через **Supabase SQL Editor**. Не создавайте таблицы и политики вручную через UI, если можно применить SQL-скрипт: так схема остается воспроизводимой для ВКР.
 
-Не создавайте таблицы вручную через UI, если можно применить SQL-скрипт. Так схема базы данных остается воспроизводимой для ВКР, GitHub и демонстрационного стенда.
+## Порядок запуска
 
-## Порядок запуска Stage 5
+### Базовая проверка
 
-Откройте Supabase Dashboard → SQL Editor и выполните скрипты по порядку:
+0. `00_connection_check.sql` — необязательная проверка доступа к SQL Editor.
 
-1. `00_connection_check.sql` — безопасная проверка, что SQL Editor выполняет запросы.
-2. `01_schema.sql` — расширения, таблицы, связи, ограничения и представление `book_catalog_view`.
-3. `02_indexes.sql` — индексы для каталога, поиска, заказов, ИИ-профилей и пользовательских событий.
-4. `03_triggers.sql` — функция `set_updated_at`, updated_at-триггеры и автосоздание `profiles` после регистрации в Supabase Auth.
-5. `04_rls_prepare.sql` — helper-функция `public.is_admin()` и документированный план RLS.
-6. `99_verify_schema.sql` — проверка наличия таблиц, ограничений, индексов, функций и триггеров.
+### Stage 5: схема данных
 
-## Порядок запуска Stage 6: Auth и роли
+1. `01_schema.sql` — таблицы, связи, ограничения и базовое представление каталога.
+2. `02_indexes.sql` — индексы.
+3. `03_triggers.sql` — `updated_at` и создание профиля после регистрации Supabase Auth.
+4. `04_rls_prepare.sql` — подготовка RLS и `public.is_admin()`.
+5. `99_verify_schema.sql` — проверка созданной схемы.
 
-После Stage 5 выполните:
+### Stage 6: Supabase Auth и роли
 
-1. `05_auth_roles.sql` — проверяет/добавляет `profiles`, роль `user/admin`, `handle_new_user()` и `public.is_admin()`.
-2. `07_auth_rls.sql` — включает базовые RLS-политики для `profiles` и `user_preferences`, а также защиту от повышения роли через клиентский update.
-3. `08_catalog_view_security.sql` — опционально пересоздает `book_catalog_view` как `security_invoker`, чтобы убрать предупреждение Supabase о публичном security definer view.
-4. Зарегистрируйте пользователя через приложение.
-5. `06_set_admin_example.sql` — замените `admin@example.com` на email зарегистрированного пользователя и выполните скрипт, чтобы назначить роль администратора.
-6. Выйдите из приложения и войдите снова, чтобы frontend перечитал `profile.role`.
+6. `05_auth_roles.sql` — профиль пользователя, триггер `handle_new_user()`, роль по умолчанию `user`.
+7. `07_auth_rls.sql` — RLS для `profiles` и `user_preferences`.
+8. Зарегистрируйте пользователя через приложение.
+9. `06_set_admin_example.sql` — назначение роли `admin` зарегистрированному пользователю. Перед запуском замените email-заглушку на реальный email.
 
-## Что создается в Stage 5
+### Stage 7: каталог книг
 
-Основные таблицы:
+10. `08_catalog_fixes.sql` — безопасные дополнения для каталожных таблиц, если они нужны.
+11. `09_catalog_view.sql` — представление `public.book_catalog_view` для frontend-каталога.
+12. `10_catalog_rls.sql` — политики чтения каталога и админ-доступа.
+13. `12_seed_catalog.sql` — демонстрационные книги, авторы, жанры и ИИ-профили.
+14. `11_verify_catalog.sql` — проверка каталога.
 
-- `profiles`
-- `user_preferences`
-- `books`
-- `authors`
-- `genres`
-- `book_authors`
-- `book_genres`
-- `book_ai_profiles`
-- `favorites`
-- `cart_items`
-- `orders`
-- `order_items`
-- `reviews`
-- `ai_analysis_jobs`
-- `user_events`
+### Stage 8: обложки книг через Supabase Storage
 
-Дополнительно:
+15. `13_storage_book_covers.sql` — bucket `book-covers`, публичное чтение, загрузка/обновление/удаление только для admin.
+16. `14_verify_storage_book_covers.sql` — проверка bucket и Storage policies.
 
-- `public.book_catalog_view` для будущего удобного чтения каталога;
-- `public.set_updated_at()` для автоматического обновления `updated_at`;
-- `public.handle_new_user()` для создания профиля при регистрации через Supabase Auth;
-- `public.is_admin()` для будущих RLS-политик.
+## Важные правила
 
-## Важные правила безопасности
-
-- Не используйте `SUPABASE_SERVICE_ROLE_KEY` во frontend-коде.
-- Не коммитьте `.env`, `.env.local`, дампы БД и реальные ключи.
-- Роль `admin` назначается только через SQL Editor или защищенный backend, а не через публичный интерфейс.
-- Не размещайте пароли, токены или инструкции по получению роли администратора в публичном UI.
-- После включения RLS проверяйте доступы обычного пользователя и администратора отдельно.
-
-## pgvector
-
-В `01_schema.sql` используется `create extension if not exists vector;` и поле `book_ai_profiles.embedding vector(1536)`.
-
-Если в конкретном Supabase-окружении расширение `vector` недоступно, используйте fallback, описанный в комментарии внутри `01_schema.sql`: хранить embedding как `jsonb`. Для стандартного Supabase-проекта pgvector обычно доступен.
-
-## Следующие этапы
-
-На следующих этапах можно добавить:
-
-- `seed.sql` — демонстрационные книги, авторы, жанры и ИИ-профили;
-- SQL для Storage bucket обложек книг;
-- RPC/functions для рекомендаций и семантического поиска;
-- интеграцию каталога, корзины и заказов с реальными таблицами.
-
-## Stage 7 — каталог книг через Supabase
-
-Выполняйте скрипты через Supabase SQL Editor после базовой схемы и auth-скриптов:
-
-1. `08_catalog_fixes.sql` — безопасные уточнения схемы каталога и уникальность авторов для seed-данных.
-2. `09_catalog_view.sql` — представление `public.book_catalog_view` для frontend-каталога.
-3. `10_catalog_rls.sql` — RLS-политики чтения активного каталога и админского управления.
-4. `12_seed_catalog.sql` — демонстрационные русскоязычные книги, авторы, жанры и ИИ-профили.
-5. `11_verify_catalog.sql` — проверка таблиц, view, количества книг и RLS.
-
-Каталог во frontend читает данные из `public.book_catalog_view`. Корзина, избранное, заказы и полноценные рекомендации остаются локальными/mock до следующих этапов.
+- Не используйте service role key во frontend.
+- Не коммитьте `.env`, `.env.local`, дампы базы и реальные секреты.
+- Bucket для обложек называется `book-covers`.
+- Обложки доступны публично для чтения, потому что это витринные изображения каталога.
+- Загружать, заменять и удалять обложки может только пользователь с ролью `admin` в `public.profiles`.
+- Если обложка не загружена, frontend показывает спокойную fallback-обложку.

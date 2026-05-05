@@ -47,7 +47,6 @@ type CatalogViewRow = {
   ai_updated_at: string | null;
 };
 
-const coverFallback = "https://images.unsplash.com/photo-1507842217343-583bb7270b66?w=600&q=80&auto=format&fit=crop";
 const cachedBooks = new Map<string, Book>();
 const cachedBooksBySlug = new Map<string, Book>();
 
@@ -109,7 +108,7 @@ export function mapCatalogRowToBook(row: CatalogViewRow): Book {
     description: row.description ?? "Описание книги пока не добавлено.",
     price: toNumber(row.price),
     format: toFormat(row.format),
-    coverUrl: row.cover_url || coverFallback,
+    coverUrl: row.cover_url ?? "",
     rating: toNumber(row.rating, 0),
     reviewsCount: 0,
     isActive: row.is_active ?? true,
@@ -261,6 +260,41 @@ export async function getGenres(): Promise<string[]> {
 export async function getAuthors(): Promise<string[]> {
   const books = await getCatalogBooks();
   return Array.from(new Set(books.flatMap((b) => b.authors))).sort((a, b) => a.localeCompare(b, "ru"));
+}
+
+export async function updateBookCover(bookId: string, coverUrl: string): Promise<void> {
+  if (!bookId) {
+    throw new Error("Не удалось определить книгу для обновления обложки.");
+  }
+
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("books")
+    .update({ cover_url: coverUrl })
+    .eq("id", bookId);
+
+  if (error) {
+    console.error("[Интеллекта][catalog] Ошибка обновления cover_url", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+      bookId,
+    });
+
+    if (error.message?.toLowerCase().includes("row-level security") || error.code === "42501") {
+      throw new Error("Недостаточно прав для обновления обложки.");
+    }
+
+    throw new Error("Не удалось сохранить ссылку на обложку.");
+  }
+
+  const cached = cachedBooks.get(bookId);
+  if (cached) {
+    const updated = { ...cached, coverUrl };
+    cachedBooks.set(bookId, updated);
+    cachedBooksBySlug.set(updated.slug, updated);
+  }
 }
 
 export function getCachedBookById(id: string): Book | undefined {

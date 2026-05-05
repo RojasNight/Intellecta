@@ -1,15 +1,18 @@
 import { toast } from "sonner";
 import { BookOpen, ClipboardList, FileText, Layout, LayoutDashboard, Pencil, Play, Plus, RefreshCw, Sparkles, Trash2, AlertTriangle } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { BRAND } from "./brand";
 import { ADMIN_ORDERS, BOOKS, GENRES } from "./data";
 import type { Book, Order } from "./types";
 import { Breadcrumbs, EmptyState, GhostButton, Notice, PrimaryButton, SectionTitle, StatusBadge } from "./shared";
+import { ImageWithFallback } from "./figma/ImageWithFallback";
+import { getCatalogBooks, updateBookCover } from "../../services/catalogService";
+import { deleteBookCoverByPath, extractStoragePathFromPublicUrl, uploadBookCover } from "../../services/storageService";
 import { SupabaseStatus } from "./SupabaseStatus";
 
 type AdminTab = "overview" | "books" | "orders" | "ai" | "logs";
 
-const NAV: { v: AdminTab; label: string; icon: React.ReactNode }[] = [
+const NAV: { v: AdminTab; label: string; icon: ReactNode }[] = [
   { v: "overview", label: "Обзор", icon: <LayoutDashboard size={16} /> },
   { v: "books", label: "Книги", icon: <Layout size={16} /> },
   { v: "orders", label: "Заказы", icon: <ClipboardList size={16} /> },
@@ -24,6 +27,26 @@ export function AdminPage() {
   const [editing, setEditing] = useState<Book | null>(null);
   const [creating, setCreating] = useState(false);
   const onToast = (message: string) => toast.success(message);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getCatalogBooks({ sort: "newest" })
+      .then((items) => {
+        if (!cancelled && items.length > 0) {
+          setBooks(items);
+        }
+      })
+      .catch((error) => {
+        console.warn("[Интеллекта][admin] Не удалось загрузить книги из Supabase для админки", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <main className="max-w-[1240px] mx-auto px-4 md:px-8 py-6 md:py-8 fade-in">
@@ -166,7 +189,7 @@ function Overview({ books, orders, go }: { books: Book[]; orders: Order[]; go: (
 function Metric({
   icon, label, value, tone = "neutral", onClick,
 }: {
-  icon: React.ReactNode; label: string; value: number;
+  icon: ReactNode; label: string; value: number;
   tone?: "neutral" | "ok" | "info" | "err";
   onClick?: () => void;
 }) {
@@ -224,6 +247,10 @@ function BooksTab({
       <BookForm
         book={editing}
         onCancel={() => { setEditing(null); setCreating(false); }}
+        onPatch={(b) => {
+          setBooks(books.map((x) => (x.id === b.id ? b : x)));
+          setEditing(b);
+        }}
         onSave={(b) => {
           if (editing) {
             setBooks(books.map((x) => (x.id === b.id ? b : x)));
@@ -360,11 +387,12 @@ function BookRowActions({
 }
 
 function BookForm({
-  book, onCancel, onSave,
+  book, onCancel, onSave, onPatch,
 }: {
   book: Book | null;
   onCancel: () => void;
   onSave: (b: Book) => void;
+  onPatch: (b: Book) => void;
 }) {
   const [title, setTitle] = useState(book?.title ?? "");
   const [author, setAuthor] = useState(book?.authors.join(", ") ?? "");
@@ -375,8 +403,45 @@ function BookForm({
   const [coverUrl, setCoverUrl] = useState(book?.coverUrl ?? "");
   const [stock, setStock] = useState<number>(book?.inStock ?? 10);
   const [active, setActive] = useState<boolean>(book?.isActive ?? true);
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [coverMessage, setCoverMessage] = useState<string | null>(null);
+  const [coverError, setCoverError] = useState<string | null>(null);
 
-  const submit = (e: React.FormEvent) => {
+  const handleCoverUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    setCoverMessage(null);
+    setCoverError(null);
+
+    if (!book?.id) {
+      setCoverError("Сначала сохраните книгу, затем загрузите обложку.");
+      return;
+    }
+
+    try {
+      setCoverUploading(true);
+      const oldPath = extractStoragePathFromPublicUrl(coverUrl);
+      const publicUrl = await uploadBookCover(file as File, book.id);
+      await updateBookCover(book.id, publicUrl);
+      setCoverUrl(publicUrl);
+      const updatedBook = { ...book, coverUrl: publicUrl };
+      onPatch(updatedBook);
+      setCoverMessage("Обложка загружена.");
+      toast.success("Обложка загружена");
+
+      if (oldPath) {
+        await deleteBookCoverByPath(oldPath);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Не удалось загрузить обложку.";
+      setCoverError(message);
+      toast.error(message);
+    } finally {
+      setCoverUploading(false);
+    }
+  };
+
+  const submit = (e: FormEvent) => {
     e.preventDefault();
     const b: Book = book ? { ...book } : ({} as Book);
     b.id = book?.id ?? "";
@@ -442,6 +507,50 @@ function BookForm({
             style={{ borderColor: BRAND.lightGray }} />
         </AField>
       </div>
+
+      <div className="rounded-xl border p-4" style={{ background: BRAND.cream, borderColor: BRAND.beige }}>
+        <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18 }}>Обложка книги</div>
+        <p className="mt-1" style={{ color: BRAND.slate, fontSize: 13 }}>JPG, PNG или WebP, до 5 МБ.</p>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-[120px_1fr] items-start">
+          <div className="rounded-lg overflow-hidden" style={{ width: 112, height: 160, background: BRAND.beige }}>
+            <ImageWithFallback
+              src={coverUrl}
+              alt={`Обложка книги ${title || book?.title || "без названия"}`}
+              className="w-full h-full object-cover"
+            />
+          </div>
+
+          <div className="space-y-3">
+            {book?.id ? (
+              <>
+                <label className="inline-flex items-center justify-center rounded-md border px-4 py-2 cursor-pointer"
+                  style={{ background: "white", borderColor: BRAND.lightGray, color: BRAND.navy }}>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="sr-only"
+                    onChange={handleCoverUpload}
+                    disabled={coverUploading}
+                  />
+                  {coverUploading ? "Загружаем обложку…" : "Загрузить обложку"}
+                </label>
+                <p style={{ color: BRAND.slate, fontSize: 13 }}>
+                  После загрузки публичная ссылка сохранится в поле books.cover_url.
+                </p>
+              </>
+            ) : (
+              <Notice tone="info" title="Обложка будет доступна после сохранения">
+                Сначала сохраните книгу, затем загрузите обложку.
+              </Notice>
+            )}
+
+            {coverMessage && <Notice tone="ok" title={coverMessage}>Предпросмотр обновлен.</Notice>}
+            {coverError && <Notice tone="err" title="Не удалось загрузить обложку">{coverError}</Notice>}
+          </div>
+        </div>
+      </div>
+
       <AField label="Жанры">
         <div className="flex flex-wrap gap-2">
           {GENRES.map((g) => {
@@ -675,13 +784,13 @@ function LogsTab() {
 
 /* ---------- shared bits ---------- */
 
-function Th({ children }: { children?: React.ReactNode }) {
+function Th({ children }: { children?: ReactNode }) {
   return <th className="text-left px-5 py-3" style={{ fontSize: 12, letterSpacing: "0.04em", textTransform: "uppercase" }}>{children}</th>;
 }
-function Td({ children }: { children?: React.ReactNode }) {
+function Td({ children }: { children?: ReactNode }) {
   return <td className="px-5 py-3" style={{ color: BRAND.charcoal }}>{children}</td>;
 }
-function IconBtn({ children, onClick, aria }: { children: React.ReactNode; onClick: () => void; aria: string }) {
+function IconBtn({ children, onClick, aria }: { children: ReactNode; onClick: () => void; aria: string }) {
   return (
     <button onClick={onClick} aria-label={aria}
       className="p-2 rounded-md border"
@@ -690,7 +799,7 @@ function IconBtn({ children, onClick, aria }: { children: React.ReactNode; onCli
     </button>
   );
 }
-function AField({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function AField({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) {
   return (
     <label className="block">
       <span style={{ color: BRAND.darkSlate, fontSize: 14, display: "block", marginBottom: 6 }}>
@@ -700,7 +809,7 @@ function AField({ label, required, children }: { label: string; required?: boole
     </label>
   );
 }
-function CardKV({ label, children }: { label: string; children: React.ReactNode }) {
+function CardKV({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
       <div style={{ color: BRAND.slate, fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase" }}>{label}</div>
