@@ -1,8 +1,8 @@
 import { Filter, Grid3x3, List, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { BRAND } from "./brand";
-import { BOOKS, GENRES, TOPICS } from "./data";
+import { getCatalogBooks } from "../../services/catalogService";
 import { useAppContext } from "./Root";
 import type { Complexity } from "./types";
 import { BookCard, Breadcrumbs, EmptyState, SkeletonCard } from "./shared";
@@ -23,7 +23,9 @@ export function CatalogPage() {
   const [sort, setSort] = useState<"popular" | "rating" | "price" | "new">("popular");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<import("./types").Book[]>([]);
 
   const toggle = <T,>(arr: T[], v: T) =>
     arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
@@ -37,48 +39,58 @@ export function CatalogPage() {
     genre.length + topics.length + formats.length + complexity.length +
     (onlyAvailable ? 1 : 0) + (priceMax !== 1000 ? 1 : 0);
 
-  const results = useMemo(() => {
-    let list = BOOKS;
-    if (q.trim()) {
-      const ql = q.toLowerCase();
-      list = list.filter(
-        (b) =>
-          b.title.toLowerCase().includes(ql) ||
-          b.authors.some((a) => a.toLowerCase().includes(ql)) ||
-          b.topics.some((t) => t.toLowerCase().includes(ql)) ||
-          b.description.toLowerCase().includes(ql)
-      );
-    }
-    if (genre.length) list = list.filter((b) => b.genres.some((g) => genre.includes(g)));
-    if (topics.length) list = list.filter((b) => b.topics.some((t) => topics.includes(t)));
-    if (formats.length) list = list.filter((b) => formats.includes(b.format));
-    if (complexity.length) list = list.filter((b) => complexity.includes(b.ai.complexityLevel));
-    if (onlyAvailable) list = list.filter((b) => b.inStock > 0 && b.isActive);
-    list = list.filter((b) => b.price <= priceMax);
-
-    switch (sort) {
-      case "rating":
-        list = [...list].sort((a, b) => b.rating - a.rating);
-        break;
-      case "price":
-        list = [...list].sort((a, b) => a.price - b.price);
-        break;
-      case "new":
-        list = [...list].sort((a, b) => b.id.localeCompare(a.id));
-        break;
-    }
-    return list;
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getCatalogBooks({
+      q,
+      genres: genre,
+      topics,
+      formats,
+      complexities: complexity,
+      maxPrice: priceMax,
+      inStock: onlyAvailable,
+      sort: sort === "price" ? "price_asc" : sort === "new" ? "newest" : sort,
+    })
+      .then((books) => {
+        if (!cancelled) {
+          console.info("[Интеллекта][catalog] UI получил книги из Supabase", { count: books.length });
+          setResults(books);
+        }
+      })
+      .catch((err) => {
+        console.error("[Интеллекта][catalog] load:error", err);
+        if (!cancelled) {
+          setError("Не удалось загрузить каталог из Supabase. Проверьте book_catalog_view, RLS и переменные окружения.");
+          setResults([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [q, genre, topics, formats, complexity, onlyAvailable, priceMax, sort]);
+
+  const availableGenres = useMemo(() => {
+    const values = Array.from(new Set(results.flatMap((b) => b.genres)));
+    return values.sort((a, b) => a.localeCompare(b, "ru"));
+  }, [results]);
+
+  const availableTopics = useMemo(() => {
+    const values = Array.from(new Set(results.flatMap((b) => b.topics)));
+    return values.sort((a, b) => a.localeCompare(b, "ru"));
+  }, [results]);
 
   const triggerLoading = () => {
     setLoading(true);
-    setTimeout(() => setLoading(false), 500);
+    setTimeout(() => setLoading(false), 250);
   };
 
   const filterPanel = (
     <div className="space-y-6">
       <FilterGroup title="Жанр">
-        {GENRES.map((g) => (
+        {availableGenres.map((g) => (
           <Check key={g} label={g} checked={genre.includes(g)} onChange={() => setGenre((s) => toggle(s, g))} />
         ))}
       </FilterGroup>
@@ -106,7 +118,7 @@ export function CatalogPage() {
       </FilterGroup>
       <FilterGroup title="Тема">
         <div className="flex flex-wrap gap-2">
-          {TOPICS.map((t) => {
+          {availableTopics.map((t) => {
             const active = topics.includes(t);
             return (
               <button
@@ -236,6 +248,15 @@ export function CatalogPage() {
         </aside>
 
         <section>
+          {error ? (
+            <div className="mb-4">
+              <EmptyState
+                title="Не удалось загрузить каталог"
+                text={error}
+                icon={<Search size={22} />}
+              />
+            </div>
+          ) : null}
           {loading ? (
             <div className={view === "grid" ? "grid gap-4 sm:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
               {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
@@ -254,7 +275,7 @@ export function CatalogPage() {
                   isFav={favorites.includes(b.id)}
                   onToggleFav={() => toggleFav(b.id)}
                   onAddToCart={() => addToCart(b.id)}
-                  onOpen={() => navigate(`/book/${b.id}`)}
+                  onOpen={() => navigate(`/book/${b.slug || b.id}`)}
                 />
               ))}
             </div>
@@ -266,7 +287,7 @@ export function CatalogPage() {
                   isFav={favorites.includes(b.id)}
                   onToggleFav={() => toggleFav(b.id)}
                   onAddToCart={() => addToCart(b.id)}
-                  onOpen={() => navigate(`/book/${b.id}`)}
+                  onOpen={() => navigate(`/book/${b.slug || b.id}`)}
                 />
               ))}
             </div>

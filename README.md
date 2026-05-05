@@ -238,3 +238,22 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 ```
 
 Серверные переменные без публичного префикса, например `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `POSTGRES_URL`, не используются во frontend и не должны попадать в браузерный код. После изменения переменных на Vercel нужно выполнить Redeploy без build cache.
+
+## Каталог книг через Supabase
+
+Stage 7 переводит каталог, карточку книги, популярные книги на главной и смысловой поиск на данные Supabase. Frontend читает каталог через `src/services/catalogService.ts` и представление `public.book_catalog_view`.
+
+Скрипты для Supabase SQL Editor:
+
+1. `supabase/sql/08_catalog_fixes.sql` — безопасные уточнения схемы каталога.
+2. `supabase/sql/09_catalog_view.sql` — view для чтения каталога одним запросом.
+3. `supabase/sql/10_catalog_rls.sql` — RLS-политики для публичного чтения активных книг и админского управления.
+4. `supabase/sql/12_seed_catalog.sql` — демонстрационные книги, авторы, жанры и ИИ-профили.
+5. `supabase/sql/11_verify_catalog.sql` — проверка результата.
+
+Ограничения этапа:
+
+- Корзина и избранное пока остаются локальными/mock.
+- Заказы пока не сохраняются в Supabase.
+- Смысловой поиск на этом этапе эвристический: он ищет по названию, описанию, авторам, жанрам, `ai_topics` и `ai_keywords`. Векторный поиск через embedding будет подключен позже.
+- Не используйте service role key во frontend.

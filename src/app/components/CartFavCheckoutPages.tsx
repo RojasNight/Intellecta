@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { BRAND } from "./brand";
 import { BOOKS } from "./data";
+import { getCachedBookById } from "../../services/catalogService";
 import { useAppContext } from "./Root";
 import type { Order } from "./types";
 import { EmptyState, GhostButton, Notice, PrimaryButton, SectionTitle, SemanticBadge, StatusBadge } from "./shared";
@@ -14,7 +15,7 @@ import { EmptyState, GhostButton, Notice, PrimaryButton, SectionTitle, SemanticB
 export function FavoritesPage() {
   const navigate = useNavigate();
   const { favorites, toggleFav, addToCart } = useAppContext();
-  const list = BOOKS.filter((b) => favorites.includes(b.id));
+  const list = favorites.map((id) => getCachedBookById(id) ?? BOOKS.find((b) => b.id === id)).filter(Boolean) as typeof BOOKS;
   return (
     <main className="max-w-[1100px] mx-auto px-4 md:px-8 py-8 md:py-10 fade-in">
       <SectionTitle sub="Книги, к которым вы хотите вернуться позже">Избранное</SectionTitle>
@@ -83,7 +84,7 @@ export function CartPage() {
   const { cart, setQty, removeItem, user } = useAppContext();
   const isAuthed = !!user;
   const [promo, setPromo] = useState("");
-  const items = cart.map((c) => ({ ...c, book: BOOKS.find((b) => b.id === c.bookId)! })).filter((x) => x.book);
+  const items = cart.map((c) => ({ ...c, book: getCachedBookById(c.bookId) ?? BOOKS.find((b) => b.id === c.bookId)! })).filter((x) => x.book);
   const total = items.reduce((s, it) => s + it.book.price * it.qty, 0);
   const hasUnavailable = items.some((it) => !it.book.isActive || it.book.inStock <= 0);
 
@@ -234,7 +235,7 @@ export function CheckoutPage() {
   const { cart, setOrders, user, clearCart } = useAppContext();
   const prefill = { name: user?.name, email: user?.email };
 
-  const items = cart.map((c) => ({ ...c, book: BOOKS.find((b) => b.id === c.bookId)! })).filter((x) => x.book);
+  const items = cart.map((c) => ({ ...c, book: getCachedBookById(c.bookId) ?? BOOKS.find((b) => b.id === c.bookId)! })).filter((x) => x.book);
   const total = items.reduce((s, it) => s + it.book.price * it.qty, 0);
 
   const [name, setName] = useState(prefill?.name ?? "");

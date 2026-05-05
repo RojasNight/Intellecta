@@ -2,7 +2,7 @@ import { ArrowLeft, Search, Sparkles, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { BRAND } from "./brand";
-import { BOOKS } from "./data";
+import { searchCatalogBooks } from "../../services/catalogService";
 import { useAppContext } from "./Root";
 import type { Book } from "./types";
 import {
@@ -64,6 +64,7 @@ export function SemanticSearchPage() {
   const query = searchParams.get("q") || searchQuery || "";
   const [draft, setDraft] = useState(query);
   const [loading, setLoading] = useState(true);
+  const [catalogBooks, setCatalogBooks] = useState<Book[]>([]);
 
   useEffect(() => {
     if (searchQuery && !searchParams.get("q")) {
@@ -72,24 +73,38 @@ export function SemanticSearchPage() {
   }, [searchQuery, searchParams, setSearchParams]);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    const t = setTimeout(() => setLoading(false), 600);
-    return () => clearTimeout(t);
+    searchCatalogBooks({ q: query, limit: 40 })
+      .then((books) => {
+        if (!cancelled) {
+          console.info("[Интеллекта][semantic-search] Книги загружены из Supabase", { count: books.length });
+          setCatalogBooks(books);
+        }
+      })
+      .catch((err) => {
+        console.error("[Интеллекта][semantic-search] load:error", err);
+        if (!cancelled) setCatalogBooks([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [query]);
 
   const qTopics = useMemo(() => deriveQueryTopics(query), [query]);
 
   const results = useMemo(() => {
-    return BOOKS
+    return catalogBooks
       .filter((b) => b.isActive)
       .map((b) => ({ book: b, ...scoreBook(b, query, qTopics) }))
-      .filter((r) => r.score > 0.05)
+      .filter((r) => !query.trim() || r.score > 0.03)
       .sort((a, b) => b.score - a.score);
-  }, [query, qTopics]);
+  }, [catalogBooks, query, qTopics]);
 
   const fallbackResults = useMemo(
-    () => BOOKS.filter((b) => b.isActive).slice(0, 6).map((b) => ({ book: b, score: 0, matched: [] as string[] })),
-    []
+    () => catalogBooks.slice(0, 6).map((b) => ({ book: b, score: 0, matched: [] as string[] })),
+    [catalogBooks]
   );
 
   const list = aiAvailable ? results : fallbackResults;
@@ -242,7 +257,7 @@ export function SemanticSearchPage() {
                     isFav={favorites.includes(book.id)}
                     onToggleFav={() => toggleFav(book.id)}
                     onAddToCart={() => addToCart(book.id)}
-                    onOpen={() => navigate(`/book/${book.id}`)}
+                    onOpen={() => navigate(`/book/${book.slug || book.id}`)}
                     score={aiAvailable && score > 0 ? score : undefined}
                     matched={matched}
                     reasons={aiAvailable && matched.length > 0 ? reasons : undefined}

@@ -1,8 +1,9 @@
 import { ArrowLeft, Heart, Info, ShoppingCart, Sparkles, Star } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { BRAND } from "./brand";
-import { BOOKS } from "./data";
+import { getBookBySlug, getCatalogBooks } from "../../services/catalogService";
 import { useAppContext } from "./Root";
 import {
   AvailabilityBadge,
@@ -15,22 +16,94 @@ import {
   PrimaryButton,
   SectionTitle,
   SemanticBadge,
+  EmptyState,
+  SkeletonCard,
 } from "./shared";
+import type { Book } from "./types";
 
 export function BookDetailsPage() {
   const { bookId } = useParams<{ bookId: string }>();
   const navigate = useNavigate();
   const { toggleFav, favorites, addToCart } = useAppContext();
 
-  const book = BOOKS.find((b) => b.id === bookId);
+  const [book, setBook] = useState<Book | null>(null);
+  const [similar, setSimilar] = useState<Book[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!book) {
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setNotFound(false);
+    setError(null);
+
+    getBookBySlug(bookId ?? "")
+      .then(async (loaded) => {
+        if (cancelled) return;
+        if (!loaded) {
+          setNotFound(true);
+          setBook(null);
+          return;
+        }
+        setBook(loaded);
+        try {
+          const candidates = await getCatalogBooks({ limit: 40 });
+          if (!cancelled) {
+            setSimilar(
+              candidates
+                .filter((b) => b.id !== loaded.id && b.isActive)
+                .map((b) => ({
+                  book: b,
+                  score:
+                    b.genres.filter((g) => loaded.genres.includes(g)).length * 2 +
+                    b.topics.filter((t) => loaded.topics.includes(t)).length,
+                }))
+                .filter((x) => x.score > 0)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 6)
+                .map((x) => x.book),
+            );
+          }
+        } catch {
+          if (!cancelled) setSimilar([]);
+        }
+      })
+      .catch((err) => {
+        console.error("[Интеллекта][book] load:error", err);
+        if (!cancelled) setError("Не удалось загрузить книгу. Попробуйте обновить страницу.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [bookId]);
+
+  if (loading) {
+    return (
+      <main className="max-w-[1240px] mx-auto px-4 md:px-8 py-10 fade-in">
+        <SkeletonCard />
+      </main>
+    );
+  }
+
+  if (notFound) {
     return <Navigate to="/404" replace />;
   }
 
-  const similar = BOOKS.filter(
-    (b) => b.id !== book.id && b.isActive && b.topics.some((t) => book.topics.includes(t))
-  ).slice(0, 6);
+  if (error || !book) {
+    return (
+      <main className="max-w-3xl mx-auto px-4 md:px-8 py-10 fade-in">
+        <EmptyState
+          title="Не удалось открыть книгу"
+          text={error ?? "Попробуйте вернуться в каталог и открыть книгу ещё раз."}
+          icon={<Info size={22} />}
+          action={<PrimaryButton onClick={() => navigate("/catalog")}>Вернуться в каталог</PrimaryButton>}
+        />
+      </main>
+    );
+  }
   const fav = favorites.includes(book.id);
   const unavailable = !book.isActive || book.inStock <= 0;
 
@@ -153,7 +226,11 @@ export function BookDetailsPage() {
                 ИИ-анализ помогает понять содержание книги, но не заменяет официальную аннотацию.
               </Notice>
 
-              <p style={{ color: BRAND.charcoal, lineHeight: 1.7 }}>{book.ai.summary}</p>
+              {book.ai.status === "Готово" ? (
+                <p style={{ color: BRAND.charcoal, lineHeight: 1.7 }}>{book.ai.summary}</p>
+              ) : (
+                <Notice tone="warn">Интеллектуальный анализ пока не готов.</Notice>
+              )}
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <KV label="Темы">
@@ -239,7 +316,7 @@ export function BookDetailsPage() {
                   isFav={favorites.includes(b.id)}
                   onToggleFav={() => toggleFav(b.id)}
                   onAddToCart={() => addToCart(b.id)}
-                  onOpen={() => navigate(`/book/${b.id}`)}
+                  onOpen={() => navigate(`/book/${b.slug || b.id}`)}
                 />
               </div>
             ))}

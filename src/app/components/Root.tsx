@@ -4,7 +4,8 @@ import { Toaster, toast } from "sonner";
 import { Header } from "./Header";
 import { useAuth } from "../auth/AuthContext";
 import { Footer } from "./Footer";
-import { BOOKS, DEMO_ORDERS } from "./data";
+import { DEMO_ORDERS } from "./data";
+import { getCachedBookById } from "../../services/catalogService";
 import type { CartItem, Order, Preferences, User } from "./types";
 
 interface AppContextValue {
@@ -62,9 +63,8 @@ export function Root() {
   };
 
   const addToCart = (id: string) => {
-    const b = BOOKS.find((x) => x.id === id);
-    if (!b) return;
-    if (!b.isActive || b.inStock <= 0) {
+    const b = getCachedBookById(id);
+    if (b && (!b.isActive || b.inStock <= 0)) {
       toast.error("Книга временно недоступна");
       return;
     }

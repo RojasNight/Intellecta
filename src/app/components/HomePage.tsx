@@ -1,13 +1,16 @@
 import { Search, Sparkles, BookOpen, Lightbulb, ArrowRight } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { BRAND } from "./brand";
-import { BOOKS } from "./data";
+import { getCatalogBooks } from "../../services/catalogService";
 import { useAppContext } from "./Root";
-import { BookCard, GhostButton, Notice, PrimaryButton, SectionTitle } from "./shared";
+import { BookCard, GhostButton, Notice, PrimaryButton, SectionTitle, SkeletonCard } from "./shared";
+import type { Book } from "./types";
 
 export function HomePage() {
   const [q, setQ] = useState("");
+  const [popular, setPopular] = useState<Book[]>([]);
+  const [loadingPopular, setLoadingPopular] = useState(true);
   const navigate = useNavigate();
   const { toggleFav, favorites, addToCart, setSearchQuery } = useAppContext();
 
@@ -17,7 +20,25 @@ export function HomePage() {
     navigate("/search");
   };
 
-  const popular = BOOKS.filter((b) => b.isActive).slice(0, 4);
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingPopular(true);
+    getCatalogBooks({ sort: "rating", limit: 4 })
+      .then((books) => {
+        if (!cancelled) {
+          console.info("[Интеллекта][home] Популярные книги загружены из Supabase", { count: books.length });
+          setPopular(books);
+        }
+      })
+      .catch((err) => {
+        console.error("[Интеллекта][home] popular:error", err);
+        if (!cancelled) setPopular([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPopular(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <main>
@@ -142,18 +163,26 @@ export function HomePage() {
             Весь каталог <ArrowRight size={16} />
           </button>
         </div>
-        <div className="grid gap-5 grid-cols-2 md:grid-cols-4">
-          {popular.map((b) => (
-            <BookCard
-              key={b.id}
-              book={b}
-              isFav={favorites.includes(b.id)}
-              onToggleFav={() => toggleFav(b.id)}
-              onAddToCart={() => addToCart(b.id)}
-              onOpen={() => navigate(`/book/${b.id}`)}
-            />
-          ))}
-        </div>
+        {loadingPopular ? (
+          <div className="grid gap-5 grid-cols-2 md:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
+        ) : popular.length === 0 ? (
+          <Notice tone="info">В каталоге пока нет активных книг.</Notice>
+        ) : (
+          <div className="grid gap-5 grid-cols-2 md:grid-cols-4">
+            {popular.map((b) => (
+              <BookCard
+                key={b.id}
+                book={b}
+                isFav={favorites.includes(b.id)}
+                onToggleFav={() => toggleFav(b.id)}
+                onAddToCart={() => addToCart(b.id)}
+                onOpen={() => navigate(`/book/${b.slug || b.id}`)}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="max-w-[1240px] mx-auto px-4 md:px-8 pb-16">
