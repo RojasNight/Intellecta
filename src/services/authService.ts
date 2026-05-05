@@ -50,8 +50,27 @@ function mapProfile(row: unknown): AppProfile | null {
 }
 
 export function getAuthErrorMessage(error: unknown): string {
+  const authError = error as Partial<AuthError> | null;
   const rawMessage = error instanceof Error ? error.message : String(error ?? "");
   const message = rawMessage.toLowerCase();
+  const code = authError?.code;
+  const status = authError?.status;
+
+  if (
+    status === 429 ||
+    code === "over_email_send_rate_limit" ||
+    message.includes("email rate limit")
+  ) {
+    return "Слишком много попыток отправки письма. Подождите несколько минут и попробуйте снова.";
+  }
+
+  if (code === "email_address_invalid" || message.includes("email address") || message.includes("invalid email")) {
+    return "Введите действующий email-адрес.";
+  }
+
+  if (message.includes("no api key") || message.includes("apikey")) {
+    return "Ключ Supabase не передан в запрос. Проверьте переменные окружения на Vercel и выполните повторный деплой без кеша.";
+  }
 
   if (message.includes("invalid login credentials") || message.includes("invalid credentials")) {
     return "Неверный email или пароль.";
@@ -66,7 +85,7 @@ export function getAuthErrorMessage(error: unknown): string {
   }
 
   if (message.includes("supabase is not configured") || message.includes("vite_supabase")) {
-    return "Supabase не настроен: проверьте переменные VITE_SUPABASE_URL и VITE_SUPABASE_ANON_KEY в Vercel.";
+    return "Supabase не настроен: проверьте переменные VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY или NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY в Vercel.";
   }
 
   if (message.includes("failed to fetch") || message.includes("network")) {
