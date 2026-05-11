@@ -10,6 +10,17 @@ function isAllowedMimeType(type: string): type is AllowedCoverMimeType {
   return ALLOWED_COVER_MIME_TYPES.includes(type as AllowedCoverMimeType);
 }
 
+function sanitizeStorageFilename(name: string) {
+  const base = name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+
+  return base || "cover";
+}
+
 function getFileExtension(file: File) {
   if (file.type === "image/jpeg") return "jpg";
   if (file.type === "image/png") return "png";
@@ -61,7 +72,8 @@ export async function uploadBookCover(file: File, bookId: string): Promise<strin
   const supabase = getSupabaseClient();
   const extension = getFileExtension(file);
   const safeBookId = bookId.replace(/[^a-zA-Z0-9_-]/g, "-");
-  const path = `${safeBookId}/${Date.now()}.${extension}`;
+  const originalName = sanitizeStorageFilename(file.name.replace(/\.[^.]+$/, ""));
+  const path = `${safeBookId}/${Date.now()}-${originalName}.${extension}`;
 
   const { error } = await supabase.storage.from(BOOK_COVERS_BUCKET).upload(path, file, {
     cacheControl: "3600",

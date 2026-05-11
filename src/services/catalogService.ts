@@ -301,6 +301,11 @@ export async function updateBookCover(bookId: string, coverUrl: string): Promise
   }
 }
 
+export function clearCatalogCache(): void {
+  cachedBooks.clear();
+  cachedBooksBySlug.clear();
+}
+
 export function getCachedBookById(id: string): Book | undefined {
   return cachedBooks.get(id) ?? BOOKS.find((b) => b.id === id);
 }

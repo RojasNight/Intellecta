@@ -1,16 +1,57 @@
 import { toast } from "sonner";
-import { BookOpen, ClipboardList, FileText, Layout, LayoutDashboard, Pencil, Play, Plus, RefreshCw, Sparkles, Trash2, AlertTriangle } from "lucide-react";
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import {
+  AlertTriangle,
+  BookOpen,
+  ClipboardList,
+  Eye,
+  EyeOff,
+  FileText,
+  Layout,
+  LayoutDashboard,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { BRAND } from "./brand";
-import { ADMIN_ORDERS, BOOKS, GENRES } from "./data";
-import type { Book, Order } from "./types";
+import { ADMIN_ORDERS } from "./data";
+import type { Order } from "./types";
 import { Breadcrumbs, EmptyState, GhostButton, Notice, PrimaryButton, SectionTitle, StatusBadge } from "./shared";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
-import { getCatalogBooks, updateBookCover } from "../../services/catalogService";
-import { deleteBookCoverByPath, extractStoragePathFromPublicUrl, uploadBookCover } from "../../services/storageService";
+import { useAuth } from "../auth/AuthContext";
+import { clearCatalogCache } from "../../services/catalogService";
+import {
+  createBook,
+  getAdminBooks,
+  getAuthors,
+  getBookForEdit,
+  getGenres,
+  restoreBook,
+  softDeleteBook,
+  updateBook,
+  type Author,
+  type Genre,
+  type BookAdminRow,
+  type BookAiProfileStatus,
+  type BookFormatValue,
+  type CreateBookInput,
+} from "../../services/adminCatalogService";
+import {
+  deleteBookCoverByPath,
+  extractStoragePathFromPublicUrl,
+  uploadBookCover,
+  validateBookCoverFile,
+} from "../../services/storageService";
 import { SupabaseStatus } from "./SupabaseStatus";
 
 type AdminTab = "overview" | "books" | "orders" | "ai" | "logs";
+type BookFormSubmit = { input: CreateBookInput; coverFile: File | null };
+type FormErrors = Partial<Record<
+  "title" | "slug" | "description" | "price" | "format" | "stock_qty" | "year" | "authors" | "genres" | "cover",
+  string
+>>;
 
 const NAV: { v: AdminTab; label: string; icon: ReactNode }[] = [
   { v: "overview", label: "Обзор", icon: <LayoutDashboard size={16} /> },
@@ -20,33 +61,92 @@ const NAV: { v: AdminTab; label: string; icon: ReactNode }[] = [
   { v: "logs", label: "Логи", icon: <FileText size={16} /> },
 ];
 
+const FORMAT_OPTIONS: Array<{ value: BookFormatValue; label: string }> = [
+  { value: "paper", label: "Печатная" },
+  { value: "ebook", label: "Электронная" },
+  { value: "audiobook", label: "Аудио" },
+];
+
+function getFormatLabel(value: BookFormatValue) {
+  return FORMAT_OPTIONS.find((item) => item.value === value)?.label ?? "Печатная";
+}
+
+function aiStatusLabel(status?: BookAiProfileStatus | null) {
+  if (status === "ready") return "Готово";
+  if (status === "processing") return "Выполняется";
+  if (status === "error") return "Ошибка";
+  return "Требуется анализ";
+}
+
+function aiStatusTone(status?: BookAiProfileStatus | null): "ok" | "warn" | "err" | "info" {
+  if (status === "ready") return "ok";
+  if (status === "processing") return "warn";
+  if (status === "error") return "err";
+  return "info";
+}
+
+function shortDate(value?: string | null) {
+  return value ? value.slice(0, 10) : "—";
+}
+
+function makeSlug(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, "e")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function getErrorMessage(error: unknown, fallback = "Операция не выполнена.") {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export function AdminPage() {
   const [tab, setTab] = useState<AdminTab>("overview");
-  const [books, setBooks] = useState<Book[]>(BOOKS);
+  const [books, setBooks] = useState<BookAdminRow[]>([]);
+  const [authors, setAuthors] = useState<Author[]>([]);
+  const [genres, setGenres] = useState<Genre[]>([]);
   const [orders, setOrders] = useState<Order[]>(ADMIN_ORDERS);
-  const [editing, setEditing] = useState<Book | null>(null);
-  const [creating, setCreating] = useState(false);
-  const onToast = (message: string) => toast.success(message);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { isAdmin } = useAuth();
+
+  const loadAdminData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const [nextBooks, nextAuthors, nextGenres] = await Promise.all([
+        getAdminBooks(),
+        getAuthors(),
+        getGenres(),
+      ]);
+      setBooks(nextBooks);
+      setAuthors(nextAuthors);
+      setGenres(nextGenres);
+    } catch (err) {
+      const message = getErrorMessage(err, "Не удалось загрузить данные админ-панели.");
+      setError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    if (isAdmin) void loadAdminData();
+  }, [isAdmin, loadAdminData]);
 
-    getCatalogBooks({ sort: "newest" })
-      .then((items) => {
-        if (!cancelled && items.length > 0) {
-          setBooks(items);
-        }
-      })
-      .catch((error) => {
-        console.warn("[Интеллекта][admin] Не удалось загрузить книги из Supabase для админки", {
-          message: error instanceof Error ? error.message : String(error),
-        });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  if (!isAdmin) {
+    return (
+      <main className="max-w-[900px] mx-auto px-4 md:px-8 py-10 fade-in">
+        <Notice tone="err" title="Недостаточно прав">
+          Административные операции доступны только пользователю с ролью admin.
+        </Notice>
+      </main>
+    );
+  }
 
   return (
     <main className="max-w-[1240px] mx-auto px-4 md:px-8 py-6 md:py-8 fade-in">
@@ -58,61 +158,41 @@ export function AdminPage() {
         Панель администратора
       </h1>
       <p style={{ color: BRAND.slate, marginTop: 4, fontSize: 14 }}>
-        Управление каталогом, заказами и заданиями ИИ-анализа.
+        Реальное управление каталогом книг в Supabase. Заказы и ИИ-анализ остаются демонстрационными до следующих этапов.
       </p>
 
-      {/* Mobile tab pills */}
       <div className="md:hidden mt-5 flex gap-2 overflow-x-auto no-scrollbar">
-        {NAV.map((it) => {
-          const active = tab === it.v;
-          return (
-            <button key={it.v} onClick={() => setTab(it.v)}
-              className="rounded-full px-3 py-2 inline-flex items-center gap-2 shrink-0"
-              style={{
-                background: active ? BRAND.navy : "white",
-                color: active ? "white" : BRAND.charcoal,
-                border: `1px solid ${active ? BRAND.navy : BRAND.lightGray}`,
-                fontSize: 13,
-              }}>
-              {it.icon} {it.label}
-            </button>
-          );
-        })}
+        {NAV.map((it) => <NavButton key={it.v} item={it} active={tab === it.v} onClick={() => setTab(it.v)} />)}
       </div>
 
       <div className="grid gap-6 md:grid-cols-[220px_1fr] mt-6 md:mt-8">
-        <aside className="hidden md:block rounded-xl border p-2 h-fit"
-          style={{ background: "white", borderColor: BRAND.beige }}>
+        <aside className="hidden md:block rounded-xl border p-2 h-fit" style={{ background: "white", borderColor: BRAND.beige }}>
           <nav>
-            {NAV.map((it) => {
-              const active = tab === it.v;
-              return (
-                <button key={it.v} onClick={() => setTab(it.v)}
-                  className="w-full text-left rounded-md px-3 py-2 inline-flex items-center gap-2 mb-1"
-                  style={{
-                    background: active ? BRAND.navy : "transparent",
-                    color: active ? "white" : BRAND.charcoal,
-                  }}
-                  aria-current={active ? "page" : undefined}>
-                  {it.icon} {it.label}
-                </button>
-              );
-            })}
+            {NAV.map((it) => <NavButton key={it.v} item={it} active={tab === it.v} onClick={() => setTab(it.v)} block />)}
           </nav>
         </aside>
 
         <section>
-          {tab === "overview" && <Overview books={books} orders={orders} go={setTab} />}
+          {error && (
+            <div className="mb-4">
+              <Notice tone="err" title="Ошибка загрузки админ-данных">
+                {error}
+              </Notice>
+            </div>
+          )}
+
+          {tab === "overview" && <Overview books={books} orders={orders} go={setTab} loading={loading} onReload={loadAdminData} />}
           {tab === "books" && (
             <BooksTab
-              books={books} setBooks={setBooks}
-              editing={editing} setEditing={setEditing}
-              creating={creating} setCreating={setCreating}
-              onToast={onToast}
+              books={books}
+              authors={authors}
+              genres={genres}
+              loading={loading}
+              onReload={loadAdminData}
             />
           )}
           {tab === "orders" && <OrdersTab orders={orders} setOrders={setOrders} />}
-          {tab === "ai" && <AITab books={books} setBooks={setBooks} onToast={onToast} />}
+          {tab === "ai" && <AITab books={books} />}
           {tab === "logs" && <LogsTab />}
         </section>
       </div>
@@ -120,67 +200,69 @@ export function AdminPage() {
   );
 }
 
-/* ---------- Overview ---------- */
+function NavButton({ item, active, onClick, block = false }: {
+  item: { label: string; icon: ReactNode };
+  active: boolean;
+  onClick: () => void;
+  block?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`${block ? "w-full text-left" : ""} rounded-md px-3 py-2 inline-flex items-center gap-2 ${block ? "mb-1" : "shrink-0"}`}
+      style={{
+        background: active ? BRAND.navy : block ? "transparent" : "white",
+        color: active ? "white" : BRAND.charcoal,
+        border: block ? undefined : `1px solid ${active ? BRAND.navy : BRAND.lightGray}`,
+        fontSize: 13,
+      }}
+      aria-current={active ? "page" : undefined}
+    >
+      {item.icon} {item.label}
+    </button>
+  );
+}
 
-function Overview({ books, orders, go }: { books: Book[]; orders: Order[]; go: (t: AdminTab) => void }) {
+function Overview({ books, orders, go, loading, onReload }: {
+  books: BookAdminRow[];
+  orders: Order[];
+  go: (t: AdminTab) => void;
+  loading: boolean;
+  onReload: () => Promise<void>;
+}) {
   const total = books.length;
-  const active = books.filter((b) => b.isActive).length;
-  const aiReady = books.filter((b) => b.ai.status === "Готово").length;
-  const aiErrors = books.filter((b) => b.ai.status === "Ошибка").length;
+  const active = books.filter((b) => b.is_active).length;
+  const aiReady = books.filter((b) => b.ai_profile?.status === "ready").length;
+  const aiPending = books.filter((b) => !b.ai_profile || b.ai_profile.status === "pending").length;
 
   return (
     <div>
-      <SectionTitle sub="Сводка по каталогу и работе ИИ-анализа">Обзор</SectionTitle>
+      <SectionTitle sub="Сводка по каталогу и текущей Supabase-интеграции">Обзор</SectionTitle>
       <SupabaseStatus />
+
+      <div className="mt-4 flex justify-end">
+        <GhostButton onClick={() => void onReload()} disabled={loading}>
+          <RefreshCw size={14} /> {loading ? "Обновляем…" : "Обновить данные"}
+        </GhostButton>
+      </div>
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-5 mt-5">
         <Metric icon={<BookOpen size={16} />} label="Всего книг" value={total} onClick={() => go("books")} />
         <Metric icon={<Layout size={16} />} label="Активные книги" value={active} tone="ok" onClick={() => go("books")} />
-        <Metric icon={<Sparkles size={16} />} label="С ИИ-профилем" value={aiReady} tone="info" onClick={() => go("ai")} />
+        <Metric icon={<Sparkles size={16} />} label="ИИ готов" value={aiReady} tone="info" onClick={() => go("ai")} />
+        <Metric icon={<AlertTriangle size={16} />} label="Требуют анализа" value={aiPending} tone={aiPending > 0 ? "err" : "neutral"} onClick={() => go("ai")} />
         <Metric icon={<ClipboardList size={16} />} label="Заказы" value={orders.length} onClick={() => go("orders")} />
-        <Metric icon={<AlertTriangle size={16} />} label="Ошибки анализа" value={aiErrors} tone={aiErrors > 0 ? "err" : "neutral"} onClick={() => go("ai")} />
       </div>
 
-      <div className="mt-8 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border p-5" style={{ background: "white", borderColor: BRAND.beige }}>
-          <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18, marginBottom: 8 }}>
-            Последние заказы
-          </div>
-          <ul className="divide-y" style={{ borderColor: BRAND.beige }}>
-            {orders.slice(0, 4).map((o) => (
-              <li key={o.id} className="flex items-center justify-between py-3"
-                style={{ borderColor: BRAND.beige }}>
-                <div>
-                  <div style={{ color: BRAND.navy }}>{o.id}</div>
-                  <div style={{ color: BRAND.slate, fontSize: 13 }}>{o.createdAt} · {o.contact.name}</div>
-                </div>
-                <StatusBadge status={o.status} tone={
-                  o.status === "завершен" ? "ok" : o.status === "отменен" ? "err" : o.status === "в обработке" ? "warn" : "info"
-                } />
-              </li>
-            ))}
-          </ul>
-          <div className="mt-3"><GhostButton onClick={() => go("orders")}>Все заказы</GhostButton></div>
+      <div className="mt-8 rounded-xl border p-5" style={{ background: "white", borderColor: BRAND.beige }}>
+        <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18, marginBottom: 8 }}>
+          Что реально сохраняется на Stage 12
         </div>
-        <div className="rounded-xl border p-5" style={{ background: "white", borderColor: BRAND.beige }}>
-          <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18, marginBottom: 8 }}>
-            Состояние ИИ-анализа
-          </div>
-          <ul className="space-y-2">
-            {(["В очереди", "Выполняется", "Готово", "Ошибка"] as const).map((s) => {
-              const count = books.filter((b) => b.ai.status === s).length;
-              const tone = s === "Готово" ? "ok" : s === "Ошибка" ? "err" : s === "Выполняется" ? "warn" : "info";
-              return (
-                <li key={s} className="flex items-center justify-between rounded-md p-3"
-                  style={{ background: BRAND.cream, border: `1px solid ${BRAND.beige}` }}>
-                  <StatusBadge status={s} tone={tone as "ok" | "warn" | "err" | "info"} />
-                  <span style={{ color: BRAND.charcoal }}>{count}</span>
-                </li>
-              );
-            })}
-          </ul>
-          <div className="mt-3"><GhostButton onClick={() => go("ai")}>Открыть ИИ-анализ</GhostButton></div>
-        </div>
+        <ul className="space-y-2" style={{ color: BRAND.charcoal, fontSize: 14 }}>
+          <li>• Книги, авторы/жанры-связи и cover_url сохраняются в Supabase.</li>
+          <li>• Скрытие книги выполняется через <code>books.is_active = false</code>, без физического удаления.</li>
+          <li>• При изменении описания AI-профиль помечается как <code>pending</code> для будущего анализа.</li>
+        </ul>
       </div>
     </div>
   );
@@ -201,32 +283,30 @@ function Metric({
   } as const;
   const t = tones[tone];
   return (
-    <button onClick={onClick}
-      className="text-left rounded-xl border p-4 hover:shadow-md transition-shadow"
-      style={{ background: "white", borderColor: BRAND.beige }}>
-      <div
-        className="inline-flex items-center justify-center rounded-lg mb-3"
-        style={{ background: t.accent, color: t.fg, width: 32, height: 32 }}
-        aria-hidden
-      >{icon}</div>
+    <button onClick={onClick} className="text-left rounded-xl border p-4 hover:shadow-md transition-shadow" style={{ background: "white", borderColor: BRAND.beige }}>
+      <div className="inline-flex items-center justify-center rounded-lg mb-3" style={{ background: t.accent, color: t.fg, width: 32, height: 32 }} aria-hidden>
+        {icon}
+      </div>
       <div style={{ color: BRAND.slate, fontSize: 12, letterSpacing: "0.04em", textTransform: "uppercase" }}>{label}</div>
       <div style={{ color: BRAND.navy, fontSize: 28, marginTop: 4 }}>{value}</div>
     </button>
   );
 }
 
-/* ---------- Books admin ---------- */
-
-function BooksTab({
-  books, setBooks, editing, setEditing, creating, setCreating, onToast,
-}: {
-  books: Book[]; setBooks: (b: Book[]) => void;
-  editing: Book | null; setEditing: (b: Book | null) => void;
-  creating: boolean; setCreating: (v: boolean) => void;
-  onToast: (m: string) => void;
+function BooksTab({ books, authors, genres, loading, onReload }: {
+  books: BookAdminRow[];
+  authors: Author[];
+  genres: Genre[];
+  loading: boolean;
+  onReload: () => Promise<void>;
 }) {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "hidden">("all");
+  const [editing, setEditing] = useState<BookAdminRow | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadingEditId, setLoadingEditId] = useState<string | null>(null);
+  const [actionBookId, setActionBookId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     let list = books;
@@ -234,53 +314,130 @@ function BooksTab({
       const ql = q.toLowerCase();
       list = list.filter((b) =>
         b.title.toLowerCase().includes(ql) ||
-        b.authors.some((a) => a.toLowerCase().includes(ql))
+        b.slug.toLowerCase().includes(ql) ||
+        b.authors.some((a) => a.full_name.toLowerCase().includes(ql)),
       );
     }
-    if (statusFilter === "active") list = list.filter((b) => b.isActive);
-    if (statusFilter === "hidden") list = list.filter((b) => !b.isActive);
+    if (statusFilter === "active") list = list.filter((b) => b.is_active);
+    if (statusFilter === "hidden") list = list.filter((b) => !b.is_active);
     return list;
   }, [books, q, statusFilter]);
+
+  const openEditForm = async (bookId: string) => {
+    setLoadingEditId(bookId);
+    try {
+      const fresh = await getBookForEdit(bookId);
+      if (!fresh) throw new Error("Книга не найдена.");
+      setEditing(fresh);
+      setCreating(false);
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Не удалось открыть книгу."));
+    } finally {
+      setLoadingEditId(null);
+    }
+  };
+
+  const handleToggleActive = async (book: BookAdminRow) => {
+    setActionBookId(book.id);
+    try {
+      if (book.is_active) {
+        await softDeleteBook(book.id);
+        toast.success("Книга скрыта из публичного каталога");
+      } else {
+        await restoreBook(book.id);
+        toast.success("Книга восстановлена в публичном каталоге");
+      }
+      clearCatalogCache();
+      await onReload();
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Не удалось изменить статус книги."));
+    } finally {
+      setActionBookId(null);
+    }
+  };
+
+  const handleSave = async ({ input, coverFile }: BookFormSubmit) => {
+    setSaving(true);
+    let uploadedCoverUrl: string | null = null;
+
+    try {
+      if (editing && coverFile) {
+        uploadedCoverUrl = await uploadBookCover(coverFile, editing.id);
+      }
+
+      if (editing) {
+        const nextInput = uploadedCoverUrl ? { ...input, cover_url: uploadedCoverUrl } : input;
+        await updateBook(editing.id, nextInput);
+
+        const oldPath = extractStoragePathFromPublicUrl(editing.cover_url ?? "");
+        const newPath = extractStoragePathFromPublicUrl(nextInput.cover_url ?? "");
+        if (oldPath && oldPath !== newPath) await deleteBookCoverByPath(oldPath);
+
+        toast.success("Книга обновлена в Supabase");
+      } else {
+        const created = await createBook(input);
+        if (coverFile) {
+          try {
+            uploadedCoverUrl = await uploadBookCover(coverFile, created.id);
+            await updateBook(created.id, { ...input, cover_url: uploadedCoverUrl });
+          } catch (coverError) {
+            if (uploadedCoverUrl) {
+              const uploadedPath = extractStoragePathFromPublicUrl(uploadedCoverUrl);
+              if (uploadedPath) await deleteBookCoverByPath(uploadedPath);
+            }
+            throw new Error(`Книга создана, но обложка не загружена: ${getErrorMessage(coverError)}`);
+          }
+        }
+        toast.success("Книга создана в Supabase");
+      }
+
+      clearCatalogCache();
+      await onReload();
+      setEditing(null);
+      setCreating(false);
+    } catch (err) {
+      if (uploadedCoverUrl && editing) {
+        const uploadedPath = extractStoragePathFromPublicUrl(uploadedCoverUrl);
+        if (uploadedPath) await deleteBookCoverByPath(uploadedPath);
+      }
+      toast.error(getErrorMessage(err, "Не удалось сохранить книгу."));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (creating || editing) {
     return (
       <BookForm
         book={editing}
+        authors={authors}
+        genres={genres}
+        saving={saving}
         onCancel={() => { setEditing(null); setCreating(false); }}
-        onPatch={(b) => {
-          setBooks(books.map((x) => (x.id === b.id ? b : x)));
-          setEditing(b);
-        }}
-        onSave={(b) => {
-          if (editing) {
-            setBooks(books.map((x) => (x.id === b.id ? b : x)));
-            toast.success("Книга обновлена");
-          } else {
-            setBooks([{ ...b, id: `b${Date.now()}` }, ...books]);
-            toast.success("Книга добавлена");
-          }
-          setEditing(null); setCreating(false);
-        }}
+        onSubmit={handleSave}
       />
     );
   }
 
-  const aiTone = (s: Book["ai"]["status"]) =>
-    s === "Готово" ? "ok" : s === "Ошибка" ? "err" : s === "Выполняется" ? "warn" : "info";
-
   return (
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <SectionTitle>Книги</SectionTitle>
-        <PrimaryButton onClick={() => setCreating(true)}>
-          <Plus size={16} /> Добавить книгу
-        </PrimaryButton>
+        <SectionTitle sub="Создание, редактирование, скрытие и восстановление книг сохраняются в Supabase.">Книги</SectionTitle>
+        <div className="flex gap-2 flex-wrap">
+          <GhostButton onClick={() => void onReload()} disabled={loading}>
+            <RefreshCw size={14} /> {loading ? "Обновляем…" : "Обновить"}
+          </GhostButton>
+          <PrimaryButton onClick={() => { setCreating(true); setEditing(null); }} disabled={loading}>
+            <Plus size={16} /> Добавить книгу
+          </PrimaryButton>
+        </div>
       </div>
 
       <div className="flex gap-2 mb-4 flex-wrap">
         <input
-          value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="Поиск по названию или автору"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Поиск по названию, slug или автору"
           className="rounded-md border px-3 py-2 outline-none flex-1 min-w-[200px]"
           style={{ borderColor: BRAND.lightGray, background: "white" }}
           aria-label="Поиск книг"
@@ -298,370 +455,380 @@ function BooksTab({
         </select>
       </div>
 
-      {/* Desktop table */}
-      <div className="hidden md:block rounded-xl border overflow-x-auto" style={{ background: "white", borderColor: BRAND.beige }}>
-        <table className="w-full text-sm" style={{ minWidth: 760 }}>
-          <thead>
-            <tr style={{ color: BRAND.slate, background: BRAND.cream }}>
-              <Th>Название</Th><Th>Автор</Th><Th>Цена</Th>
-              <Th>Статус</Th><Th>ИИ</Th><Th>Обновлено</Th><Th>Действия</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((b) => (
-              <tr key={b.id} className="border-t" style={{ borderColor: BRAND.beige }}>
-                <Td><span style={{ color: BRAND.navy }}>{b.title}</span></Td>
-                <Td>{b.authors.join(", ")}</Td>
-                <Td>{b.price} ₽</Td>
-                <Td><StatusBadge status={b.isActive ? "Активна" : "Скрыта"} tone={b.isActive ? "ok" : "neutral"} /></Td>
-                <Td><StatusBadge status={b.ai.status} tone={aiTone(b.ai.status) as "ok" | "warn" | "err" | "info"} /></Td>
-                <Td>{b.ai.updatedAt}</Td>
-                <Td><BookRowActions
-                  book={b}
-                  onEdit={() => setEditing(b)}
-                  onToggleActive={() => {
-                    setBooks(books.map((x) => x.id === b.id ? { ...x, isActive: !x.isActive } : x));
-                    toast.success(b.isActive ? "Книга скрыта" : "Книга показана");
-                  }}
-                  onRunAI={() => {
-                    setBooks(books.map((x) => x.id === b.id ? { ...x, ai: { ...x.ai, status: "В очереди" } } : x));
-                    toast.success("ИИ-анализ поставлен в очередь");
-                  }}
-                /></Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Mobile cards */}
-      <div className="md:hidden space-y-3">
-        {filtered.map((b) => (
-          <div key={b.id} className="rounded-xl border p-4"
-            style={{ background: "white", borderColor: BRAND.beige }}>
-            <div className="font-serif" style={{ color: BRAND.navy, fontSize: 16, lineHeight: 1.3 }}>{b.title}</div>
-            <div style={{ color: BRAND.slate, fontSize: 13 }}>{b.authors.join(", ")}</div>
-            <dl className="grid grid-cols-2 gap-2 mt-3" style={{ fontSize: 13 }}>
-              <CardKV label="Цена">{b.price} ₽</CardKV>
-              <CardKV label="Обновлено">{b.ai.updatedAt}</CardKV>
-              <CardKV label="Статус">
-                <StatusBadge status={b.isActive ? "Активна" : "Скрыта"} tone={b.isActive ? "ok" : "neutral"} />
-              </CardKV>
-              <CardKV label="ИИ-анализ">
-                <StatusBadge status={b.ai.status} tone={aiTone(b.ai.status) as "ok" | "warn" | "err" | "info"} />
-              </CardKV>
-            </dl>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <BookRowActions
-                book={b}
-                onEdit={() => setEditing(b)}
-                onToggleActive={() => {
-                  setBooks(books.map((x) => x.id === b.id ? { ...x, isActive: !x.isActive } : x));
-                  toast.success(b.isActive ? "Книга скрыта" : "Книга показана");
-                }}
-                onRunAI={() => {
-                  setBooks(books.map((x) => x.id === b.id ? { ...x, ai: { ...x.ai, status: "В очереди" } } : x));
-                  toast.success("ИИ-анализ поставлен в очередь");
-                }}
-              />
-            </div>
+      {loading && books.length === 0 ? (
+        <Notice tone="info" title="Загружаем каталог">Получаем книги, авторов и жанры из Supabase.</Notice>
+      ) : filtered.length === 0 ? (
+        <EmptyState title="Книги не найдены" text="Проверьте фильтр или создайте первую книгу." />
+      ) : (
+        <>
+          <div className="hidden md:block rounded-xl border overflow-x-auto" style={{ background: "white", borderColor: BRAND.beige }}>
+            <table className="w-full text-sm" style={{ minWidth: 920 }}>
+              <thead>
+                <tr style={{ color: BRAND.slate, background: BRAND.cream }}>
+                  <Th>Название</Th><Th>Автор</Th><Th>Цена</Th><Th>Формат</Th><Th>Статус</Th><Th>ИИ</Th><Th>Обновлено</Th><Th>Действия</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((b) => (
+                  <tr key={b.id} className="border-t" style={{ borderColor: BRAND.beige }}>
+                    <Td>
+                      <span style={{ color: BRAND.navy }}>{b.title}</span>
+                      <div style={{ color: BRAND.gray, fontSize: 12 }}>{b.slug}</div>
+                    </Td>
+                    <Td>{b.authors.map((a) => a.full_name).join(", ") || "—"}</Td>
+                    <Td>{b.price} ₽</Td>
+                    <Td>{getFormatLabel(b.format)}</Td>
+                    <Td><StatusBadge status={b.is_active ? "Активна" : "Скрыта"} tone={b.is_active ? "ok" : "neutral"} /></Td>
+                    <Td><StatusBadge status={aiStatusLabel(b.ai_profile?.status)} tone={aiStatusTone(b.ai_profile?.status)} /></Td>
+                    <Td>{shortDate(b.updated_at)}</Td>
+                    <Td>
+                      <BookRowActions
+                        book={b}
+                        busy={actionBookId === b.id || loadingEditId === b.id}
+                        onEdit={() => void openEditForm(b.id)}
+                        onToggleActive={() => void handleToggleActive(b)}
+                      />
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))}
-      </div>
+
+          <div className="md:hidden space-y-3">
+            {filtered.map((b) => (
+              <div key={b.id} className="rounded-xl border p-4" style={{ background: "white", borderColor: BRAND.beige }}>
+                <div className="font-serif" style={{ color: BRAND.navy, fontSize: 16, lineHeight: 1.3 }}>{b.title}</div>
+                <div style={{ color: BRAND.slate, fontSize: 13 }}>{b.authors.map((a) => a.full_name).join(", ") || "—"}</div>
+                <dl className="grid grid-cols-2 gap-2 mt-3" style={{ fontSize: 13 }}>
+                  <CardKV label="Цена">{b.price} ₽</CardKV>
+                  <CardKV label="Формат">{getFormatLabel(b.format)}</CardKV>
+                  <CardKV label="Статус"><StatusBadge status={b.is_active ? "Активна" : "Скрыта"} tone={b.is_active ? "ok" : "neutral"} /></CardKV>
+                  <CardKV label="ИИ"><StatusBadge status={aiStatusLabel(b.ai_profile?.status)} tone={aiStatusTone(b.ai_profile?.status)} /></CardKV>
+                </dl>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <BookRowActions
+                    book={b}
+                    busy={actionBookId === b.id || loadingEditId === b.id}
+                    onEdit={() => void openEditForm(b.id)}
+                    onToggleActive={() => void handleToggleActive(b)}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-function BookRowActions({
-  onEdit, onToggleActive, onRunAI,
-}: {
-  book: Book; onEdit: () => void; onToggleActive: () => void; onRunAI: () => void;
+function BookRowActions({ book, busy, onEdit, onToggleActive }: {
+  book: BookAdminRow;
+  busy: boolean;
+  onEdit: () => void;
+  onToggleActive: () => void;
 }) {
   return (
     <div className="inline-flex items-center gap-1 flex-wrap">
-      <IconBtn aria="Редактировать" onClick={onEdit}><Pencil size={14} /></IconBtn>
-      <IconBtn aria="Скрыть/показать" onClick={onToggleActive}><Trash2 size={14} /></IconBtn>
-      <IconBtn aria="Запустить ИИ-анализ" onClick={onRunAI}><Play size={14} /></IconBtn>
+      <IconBtn aria="Редактировать" onClick={onEdit} disabled={busy}><Pencil size={14} /></IconBtn>
+      <IconBtn aria={book.is_active ? "Скрыть книгу" : "Восстановить книгу"} onClick={onToggleActive} disabled={busy}>
+        {book.is_active ? <EyeOff size={14} /> : <Eye size={14} />}
+      </IconBtn>
     </div>
   );
 }
 
-function BookForm({
-  book, onCancel, onSave, onPatch,
-}: {
-  book: Book | null;
+function BookForm({ book, authors, genres, saving, onCancel, onSubmit }: {
+  book: BookAdminRow | null;
+  authors: Author[];
+  genres: Genre[];
+  saving: boolean;
   onCancel: () => void;
-  onSave: (b: Book) => void;
-  onPatch: (b: Book) => void;
+  onSubmit: (payload: BookFormSubmit) => Promise<void>;
 }) {
   const [title, setTitle] = useState(book?.title ?? "");
-  const [author, setAuthor] = useState(book?.authors.join(", ") ?? "");
+  const [slug, setSlug] = useState(book?.slug ?? "");
+  const [slugTouched, setSlugTouched] = useState(Boolean(book?.slug));
   const [description, setDescription] = useState(book?.description ?? "");
-  const [genres, setGenres] = useState<string[]>(book?.genres ?? []);
-  const [price, setPrice] = useState<number>(book?.price ?? 500);
-  const [format, setFormat] = useState(book?.format ?? "Печатная");
-  const [coverUrl, setCoverUrl] = useState(book?.coverUrl ?? "");
-  const [stock, setStock] = useState<number>(book?.inStock ?? 10);
-  const [active, setActive] = useState<boolean>(book?.isActive ?? true);
-  const [coverUploading, setCoverUploading] = useState(false);
-  const [coverMessage, setCoverMessage] = useState<string | null>(null);
-  const [coverError, setCoverError] = useState<string | null>(null);
+  const [isbn, setIsbn] = useState(book?.isbn ?? "");
+  const [publisher, setPublisher] = useState(book?.publisher ?? "");
+  const [year, setYear] = useState(book?.year ? String(book.year) : "");
+  const [price, setPrice] = useState(String(book?.price ?? 0));
+  const [format, setFormat] = useState<BookFormatValue>(book?.format ?? "paper");
+  const [coverUrl, setCoverUrl] = useState(book?.cover_url ?? "");
+  const [stock, setStock] = useState(String(book?.stock_qty ?? 0));
+  const [active, setActive] = useState(book?.is_active ?? true);
+  const [selectedAuthorIds, setSelectedAuthorIds] = useState<string[]>(book?.authors.map((a) => a.id) ?? []);
+  const [selectedGenreIds, setSelectedGenreIds] = useState<string[]>(book?.genres.map((g) => g.id) ?? []);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [errors, setErrors] = useState<FormErrors>({});
 
-  const handleCoverUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    setCoverMessage(null);
-    setCoverError(null);
-
-    if (!book?.id) {
-      setCoverError("Сначала сохраните книгу, затем загрузите обложку.");
+  useEffect(() => {
+    if (!coverFile) {
+      setCoverPreview(null);
       return;
     }
+    const url = URL.createObjectURL(coverFile);
+    setCoverPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [coverFile]);
+
+  const handleTitleChange = (value: string) => {
+    setTitle(value);
+    if (!slugTouched) setSlug(makeSlug(value));
+  };
+
+  const handleCoverChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    setErrors((current) => ({ ...current, cover: undefined }));
+
+    if (!file) return;
 
     try {
-      setCoverUploading(true);
-      const oldPath = extractStoragePathFromPublicUrl(coverUrl);
-      const publicUrl = await uploadBookCover(file as File, book.id);
-      await updateBookCover(book.id, publicUrl);
-      setCoverUrl(publicUrl);
-      const updatedBook = { ...book, coverUrl: publicUrl };
-      onPatch(updatedBook);
-      setCoverMessage("Обложка загружена.");
-      toast.success("Обложка загружена");
-
-      if (oldPath) {
-        await deleteBookCoverByPath(oldPath);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Не удалось загрузить обложку.";
-      setCoverError(message);
-      toast.error(message);
-    } finally {
-      setCoverUploading(false);
+      validateBookCoverFile(file);
+      setCoverFile(file);
+    } catch (err) {
+      setCoverFile(null);
+      setErrors((current) => ({ ...current, cover: getErrorMessage(err, "Некорректный файл обложки.") }));
     }
   };
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    const b: Book = book ? { ...book } : ({} as Book);
-    b.id = book?.id ?? "";
-    b.slug = (title || "kniga").toLowerCase().replace(/\s+/g, "-");
-    b.title = title;
-    b.authors = author.split(",").map((s) => s.trim()).filter(Boolean);
-    b.description = description;
-    b.genres = genres;
-    b.price = price;
-    b.format = format as Book["format"];
-    b.coverUrl = coverUrl || (book?.coverUrl ?? "");
-    b.inStock = stock;
-    b.isActive = active;
-    b.rating = book?.rating ?? 0;
-    b.reviewsCount = book?.reviewsCount ?? 0;
-    b.topics = book?.topics ?? [];
-    b.ai = book?.ai ?? {
-      summary: "—", topics: [], keywords: [],
-      complexityLevel: "Средний", emotionalTone: "—",
-      status: "В очереди", updatedAt: new Date().toISOString().slice(0, 10),
-    };
-    onSave(b);
+  const toggleId = (ids: string[], id: string) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id];
+
+  const validate = (): FormErrors => {
+    const next: FormErrors = {};
+    const normalizedSlug = slug.trim();
+    const priceValue = Number(price);
+    const stockValue = Number(stock);
+    const yearValue = year.trim() ? Number(year) : null;
+    const nextYear = new Date().getFullYear() + 1;
+
+    if (!title.trim()) next.title = "Укажите название книги.";
+    if (!normalizedSlug) next.slug = "Укажите slug.";
+    else if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalizedSlug)) {
+      next.slug = "Slug должен содержать только латиницу, цифры и дефисы.";
+    }
+    if (!description.trim()) next.description = "Добавьте описание книги.";
+    else if (description.trim().length < 50) next.description = "Описание должно быть не короче 50 символов для будущего ИИ-анализа.";
+    if (!Number.isFinite(priceValue) || priceValue < 0) next.price = "Цена должна быть числом не меньше 0.";
+    if (!Number.isInteger(stockValue) || stockValue < 0) next.stock_qty = "Количество должно быть целым числом не меньше 0.";
+    if (yearValue !== null && (!Number.isInteger(yearValue) || yearValue < 1000 || yearValue > nextYear)) {
+      next.year = `Год должен быть от 1000 до ${nextYear}.`;
+    }
+    if (!FORMAT_OPTIONS.some((item) => item.value === format)) next.format = "Выберите корректный формат.";
+    if (selectedAuthorIds.length === 0) next.authors = "Выберите хотя бы одного автора.";
+    if (selectedGenreIds.length === 0) next.genres = "Выберите хотя бы один жанр.";
+
+    if (coverFile) {
+      try {
+        validateBookCoverFile(coverFile);
+      } catch (err) {
+        next.cover = getErrorMessage(err, "Некорректный файл обложки.");
+      }
+    }
+
+    return next;
+  };
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextErrors = validate();
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
+    await onSubmit({
+      input: {
+        title: title.trim(),
+        slug: slug.trim(),
+        description: description.trim(),
+        isbn: isbn.trim() || null,
+        publisher: publisher.trim() || null,
+        year: year.trim() ? Number(year) : null,
+        price: Number(price),
+        format,
+        cover_url: coverUrl.trim() || null,
+        stock_qty: Number(stock),
+        is_active: active,
+        author_ids: selectedAuthorIds,
+        genre_ids: selectedGenreIds,
+      },
+      coverFile,
+    });
   };
 
   return (
-    <form onSubmit={submit}
-      className="rounded-xl border p-5 md:p-6 space-y-5"
-      style={{ background: "white", borderColor: BRAND.beige }}>
-      <div className="font-serif" style={{ color: BRAND.navy, fontSize: 22 }}>
-        {book ? "Редактировать книгу" : "Новая книга"}
+    <form onSubmit={submit} className="rounded-xl border p-5 md:p-6 space-y-5" style={{ background: "white", borderColor: BRAND.beige }}>
+      <div>
+        <div className="font-serif" style={{ color: BRAND.navy, fontSize: 22 }}>
+          {book ? "Редактировать книгу" : "Новая книга"}
+        </div>
+        <p style={{ color: BRAND.slate, fontSize: 13, marginTop: 4 }}>
+          Все изменения сохраняются в Supabase. Slug используется в публичном URL карточки книги.
+        </p>
       </div>
+
+      {book?.ai_profile?.status === "pending" && (
+        <Notice tone="info" title="Требуется ИИ-анализ">
+          Профиль книги находится в статусе pending. Полноценный запуск анализа будет реализован на Stage 17.
+        </Notice>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
-        <AField label="Название" required>
-          <input value={title} onChange={(e) => setTitle(e.target.value)}
-            required className="w-full rounded-md border px-3 py-2.5 outline-none"
-            style={{ borderColor: BRAND.lightGray }} />
+        <AField label="Название" required error={errors.title}>
+          <input value={title} onChange={(e) => handleTitleChange(e.target.value)} className="w-full rounded-md border px-3 py-2.5 outline-none" style={{ borderColor: errors.title ? "#8C2A2A" : BRAND.lightGray }} />
         </AField>
-        <AField label="Автор">
-          <input value={author} onChange={(e) => setAuthor(e.target.value)}
-            placeholder="Через запятую" className="w-full rounded-md border px-3 py-2.5 outline-none"
-            style={{ borderColor: BRAND.lightGray }} />
+        <AField label="Slug" required error={errors.slug}>
+          <input value={slug} onChange={(e) => { setSlugTouched(true); setSlug(e.target.value); }} placeholder="primer-knigi" className="w-full rounded-md border px-3 py-2.5 outline-none" style={{ borderColor: errors.slug ? "#8C2A2A" : BRAND.lightGray }} />
         </AField>
-        <AField label="Цена, ₽">
-          <input type="number" value={price} onChange={(e) => setPrice(parseInt(e.target.value) || 0)}
-            className="w-full rounded-md border px-3 py-2.5 outline-none"
-            style={{ borderColor: BRAND.lightGray }} />
+        <AField label="ISBN" error={undefined}>
+          <input value={isbn} onChange={(e) => setIsbn(e.target.value)} className="w-full rounded-md border px-3 py-2.5 outline-none" style={{ borderColor: BRAND.lightGray }} />
         </AField>
-        <AField label="Формат">
-          <select value={format} onChange={(e) => setFormat(e.target.value as Book["format"])}
-            className="w-full rounded-md border px-3 py-2.5 bg-white"
-            style={{ borderColor: BRAND.lightGray }}>
-            <option>Печатная</option><option>Электронная</option><option>Аудио</option>
+        <AField label="Издательство" error={undefined}>
+          <input value={publisher} onChange={(e) => setPublisher(e.target.value)} className="w-full rounded-md border px-3 py-2.5 outline-none" style={{ borderColor: BRAND.lightGray }} />
+        </AField>
+        <AField label="Год" error={errors.year}>
+          <input value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" className="w-full rounded-md border px-3 py-2.5 outline-none" style={{ borderColor: errors.year ? "#8C2A2A" : BRAND.lightGray }} />
+        </AField>
+        <AField label="Цена, ₽" required error={errors.price}>
+          <input type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full rounded-md border px-3 py-2.5 outline-none" style={{ borderColor: errors.price ? "#8C2A2A" : BRAND.lightGray }} />
+        </AField>
+        <AField label="Формат" required error={errors.format}>
+          <select value={format} onChange={(e) => setFormat(e.target.value as BookFormatValue)} className="w-full rounded-md border px-3 py-2.5 bg-white" style={{ borderColor: errors.format ? "#8C2A2A" : BRAND.lightGray }}>
+            {FORMAT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
         </AField>
-        <AField label="URL обложки">
-          <input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)}
-            placeholder="https://..." className="w-full rounded-md border px-3 py-2.5 outline-none"
-            style={{ borderColor: BRAND.lightGray }} />
+        <AField label="Количество на складе" required error={errors.stock_qty}>
+          <input type="number" min="0" step="1" value={stock} onChange={(e) => setStock(e.target.value)} className="w-full rounded-md border px-3 py-2.5 outline-none" style={{ borderColor: errors.stock_qty ? "#8C2A2A" : BRAND.lightGray }} />
         </AField>
-        <AField label="Количество на складе">
-          <input type="number" value={stock} onChange={(e) => setStock(parseInt(e.target.value) || 0)}
-            className="w-full rounded-md border px-3 py-2.5 outline-none"
-            style={{ borderColor: BRAND.lightGray }} />
-        </AField>
+      </div>
+
+      <AField label="Описание" required error={errors.description}>
+        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={5} className="w-full rounded-md border px-3 py-2 outline-none" style={{ borderColor: errors.description ? "#8C2A2A" : BRAND.lightGray }} />
+      </AField>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <RelationPicker
+          label="Авторы"
+          required
+          error={errors.authors}
+          emptyText="В Supabase пока нет авторов. Добавьте их seed-скриптом или через следующий UI-этап."
+          items={authors.map((a) => ({ id: a.id, label: a.full_name }))}
+          selectedIds={selectedAuthorIds}
+          onToggle={(id) => setSelectedAuthorIds((ids) => toggleId(ids, id))}
+        />
+        <RelationPicker
+          label="Жанры"
+          required
+          error={errors.genres}
+          emptyText="В Supabase пока нет жанров. Добавьте их seed-скриптом или через следующий UI-этап."
+          items={genres.map((g) => ({ id: g.id, label: g.name }))}
+          selectedIds={selectedGenreIds}
+          onToggle={(id) => setSelectedGenreIds((ids) => toggleId(ids, id))}
+        />
       </div>
 
       <div className="rounded-xl border p-4" style={{ background: BRAND.cream, borderColor: BRAND.beige }}>
         <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18 }}>Обложка книги</div>
-        <p className="mt-1" style={{ color: BRAND.slate, fontSize: 13 }}>JPG, PNG или WebP, до 5 МБ.</p>
+        <p className="mt-1" style={{ color: BRAND.slate, fontSize: 13 }}>
+          JPG, PNG или WebP, до 5 МБ. Файл загружается в bucket book-covers при сохранении формы.
+        </p>
 
         <div className="mt-4 grid gap-4 sm:grid-cols-[120px_1fr] items-start">
           <div className="rounded-lg overflow-hidden" style={{ width: 112, height: 160, background: BRAND.beige }}>
-            <ImageWithFallback
-              src={coverUrl}
-              alt={`Обложка книги ${title || book?.title || "без названия"}`}
-              className="w-full h-full object-cover"
-            />
+            <ImageWithFallback src={coverPreview ?? coverUrl} alt={`Обложка книги ${title || "без названия"}`} className="w-full h-full object-cover" />
           </div>
-
           <div className="space-y-3">
-            {book?.id ? (
-              <>
-                <label className="inline-flex items-center justify-center rounded-md border px-4 py-2 cursor-pointer"
-                  style={{ background: "white", borderColor: BRAND.lightGray, color: BRAND.navy }}>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    className="sr-only"
-                    onChange={handleCoverUpload}
-                    disabled={coverUploading}
-                  />
-                  {coverUploading ? "Загружаем обложку…" : "Загрузить обложку"}
-                </label>
-                <p style={{ color: BRAND.slate, fontSize: 13 }}>
-                  После загрузки публичная ссылка сохранится в поле books.cover_url.
-                </p>
-              </>
-            ) : (
-              <Notice tone="info" title="Обложка будет доступна после сохранения">
-                Сначала сохраните книгу, затем загрузите обложку.
-              </Notice>
-            )}
-
-            {coverMessage && <Notice tone="ok" title={coverMessage}>Предпросмотр обновлен.</Notice>}
-            {coverError && <Notice tone="err" title="Не удалось загрузить обложку">{coverError}</Notice>}
+            <AField label="Публичный URL обложки" error={undefined}>
+              <input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)} placeholder="https://..." className="w-full rounded-md border px-3 py-2.5 outline-none" style={{ borderColor: BRAND.lightGray }} />
+            </AField>
+            <label className="inline-flex items-center justify-center rounded-md border px-4 py-2 cursor-pointer" style={{ background: "white", borderColor: BRAND.lightGray, color: BRAND.navy }}>
+              <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={handleCoverChange} disabled={saving} />
+              {coverFile ? `Выбран файл: ${coverFile.name}` : "Выбрать файл обложки"}
+            </label>
+            <div className="flex gap-2 flex-wrap">
+              {coverFile && <GhostButton onClick={() => setCoverFile(null)} disabled={saving}>Убрать выбранный файл</GhostButton>}
+              {coverUrl && <GhostButton onClick={() => { setCoverUrl(""); setCoverFile(null); }} disabled={saving}><Trash2 size={14} /> Удалить текущую обложку</GhostButton>}
+            </div>
+            {errors.cover && <Notice tone="err" title="Некорректная обложка">{errors.cover}</Notice>}
           </div>
         </div>
       </div>
 
-      <AField label="Жанры">
-        <div className="flex flex-wrap gap-2">
-          {GENRES.map((g) => {
-            const active = genres.includes(g);
-            return (
-              <button type="button" key={g}
-                onClick={() => setGenres((s) => s.includes(g) ? s.filter((x) => x !== g) : [...s, g])}
-                aria-pressed={active}
-                className="rounded-full"
-                style={{
-                  padding: "4px 12px", fontSize: 12,
-                  background: active ? BRAND.navy : BRAND.beige,
-                  color: active ? "white" : BRAND.darkSlate,
-                }}>{g}</button>
-            );
-          })}
-        </div>
-      </AField>
-      <AField label="Описание">
-        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4}
-          className="w-full rounded-md border px-3 py-2 outline-none"
-          style={{ borderColor: BRAND.lightGray }} />
-      </AField>
       <label className="inline-flex items-center gap-2" style={{ color: BRAND.charcoal }}>
-        <input type="checkbox" checked={active} onChange={() => setActive(!active)}
-          style={{ accentColor: BRAND.navy }} />
-        Книга активна и видна в каталоге
+        <input type="checkbox" checked={active} onChange={() => setActive(!active)} style={{ accentColor: BRAND.navy }} />
+        Книга активна и видна в публичном каталоге
       </label>
+
       <div className="flex gap-3 justify-end flex-wrap">
-        <GhostButton onClick={onCancel}>Отмена</GhostButton>
-        <PrimaryButton type="submit">{book ? "Сохранить" : "Создать"}</PrimaryButton>
+        <GhostButton onClick={onCancel} disabled={saving}>Отмена</GhostButton>
+        <PrimaryButton type="submit" disabled={saving}>{saving ? "Сохраняем…" : book ? "Сохранить" : "Создать"}</PrimaryButton>
       </div>
     </form>
   );
 }
 
-/* ---------- AI Tab ---------- */
-
-function AITab({
-  books, setBooks, onToast,
-}: {
-  books: Book[]; setBooks: (b: Book[]) => void; onToast: (m: string) => void;
+function RelationPicker({ label, required, error, emptyText, items, selectedIds, onToggle }: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  emptyText: string;
+  items: Array<{ id: string; label: string }>;
+  selectedIds: string[];
+  onToggle: (id: string) => void;
 }) {
-  const tone = (s: Book["ai"]["status"]) =>
-    s === "Готово" ? "ok" : s === "Ошибка" ? "err" : s === "Выполняется" ? "warn" : "info";
-
-  const run = (id: string) => {
-    setBooks(books.map((b) => b.id === id ? {
-      ...b, ai: { ...b.ai, status: "Выполняется", updatedAt: new Date().toISOString().slice(0, 16).replace("T", " ") },
-    } : b));
-    toast.success("ИИ-анализ запущен");
-    setTimeout(() => {
-      setBooks(books.map((b) => b.id === id ? {
-        ...b, ai: { ...b.ai, status: "Готово", updatedAt: new Date().toISOString().slice(0, 10) },
-      } : b));
-    }, 1400);
-  };
-
-  const startedAt = (b: Book) => b.ai.status === "В очереди" ? "—" : b.ai.updatedAt;
-  const finishedAt = (b: Book) => b.ai.status === "Готово" ? b.ai.updatedAt : "—";
-
   return (
     <div>
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <SectionTitle sub="Жизненный цикл задания: В очереди → Выполняется → Готово / Ошибка">
-          ИИ-анализ книг
-        </SectionTitle>
-        <PrimaryButton onClick={() => toast.success("Запущен пакетный анализ")}>
-          <Play size={14} /> Запустить ИИ-анализ
-        </PrimaryButton>
+      <div style={{ color: BRAND.darkSlate, fontSize: 14, marginBottom: 6 }}>
+        {label}{required && <span style={{ color: "#8C2A2A" }}> *</span>}
       </div>
+      <div className="rounded-xl border p-3 max-h-56 overflow-auto" style={{ background: "white", borderColor: error ? "#8C2A2A" : BRAND.beige }}>
+        {items.length === 0 ? (
+          <div style={{ color: BRAND.slate, fontSize: 13 }}>{emptyText}</div>
+        ) : (
+          <div className="space-y-2">
+            {items.map((item) => (
+              <label key={item.id} className="flex items-center gap-2" style={{ color: BRAND.charcoal, fontSize: 14 }}>
+                <input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => onToggle(item.id)} style={{ accentColor: BRAND.navy }} />
+                {item.label}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+      {error && <div style={{ color: "#8C2A2A", fontSize: 12, marginTop: 5 }}>{error}</div>}
+    </div>
+  );
+}
 
-      <div className="space-y-3">
+function AITab({ books }: { books: BookAdminRow[] }) {
+  return (
+    <div>
+      <SectionTitle sub="На Stage 12 настоящий запуск ИИ не реализуется. Здесь виден статус профиля книги.">
+        ИИ-анализ книг
+      </SectionTitle>
+      <Notice tone="info" title="Запуск анализа будет реализован на Stage 17">
+        Создание и изменение описания книги помечает AI-профиль как pending. Это честный статус без имитации выполнения анализа.
+      </Notice>
+
+      <div className="space-y-3 mt-4">
         {books.map((b) => (
-          <div key={b.id}
-            className="rounded-xl border p-5 grid gap-4 md:grid-cols-[1fr_auto]"
-            style={{ background: "white", borderColor: BRAND.beige }}>
+          <div key={b.id} className="rounded-xl border p-5 grid gap-4 md:grid-cols-[1fr_auto]" style={{ background: "white", borderColor: BRAND.beige }}>
             <div>
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18 }}>{b.title}</div>
-                <StatusBadge status={b.ai.status} tone={tone(b.ai.status) as "ok" | "warn" | "err" | "info"} />
+                <StatusBadge status={aiStatusLabel(b.ai_profile?.status)} tone={aiStatusTone(b.ai_profile?.status)} />
               </div>
               <div className="grid gap-3 sm:grid-cols-3 mt-3" style={{ fontSize: 13 }}>
-                <CardKV label="Запущено">{startedAt(b)}</CardKV>
-                <CardKV label="Завершено">{finishedAt(b)}</CardKV>
-                <CardKV label="Обновлено">{b.ai.updatedAt}</CardKV>
+                <CardKV label="Обновлено">{shortDate(b.ai_profile?.updated_at)}</CardKV>
+                <CardKV label="Темы">{b.ai_profile?.topics.join(", ") || "—"}</CardKV>
+                <CardKV label="Ключевые слова">{b.ai_profile?.keywords.join(", ") || "—"}</CardKV>
               </div>
-              {b.ai.status === "Ошибка" ? (
-                <div className="mt-3">
-                  <Notice tone="err" title="Анализ завершился ошибкой">
-                    Не удалось обработать книгу. Попробуйте перезапустить задание.
-                  </Notice>
-                </div>
-              ) : (
-                <div className="mt-3 grid gap-3 sm:grid-cols-2" style={{ color: BRAND.charcoal, fontSize: 14 }}>
-                  <CardKV label="Резюме">{b.ai.summary}</CardKV>
-                  <CardKV label="Темы">{b.ai.topics.join(", ") || "—"}</CardKV>
-                  <CardKV label="Ключевые слова">{b.ai.keywords.join(", ") || "—"}</CardKV>
-                  <CardKV label="Сложность · тон">{b.ai.complexityLevel} · {b.ai.emotionalTone}</CardKV>
-                </div>
-              )}
-            </div>
-            <div className="flex md:flex-col items-start gap-2">
-              <PrimaryButton onClick={() => run(b.id)}>
-                <Play size={14} /> Запустить
-              </PrimaryButton>
-              {b.ai.status === "Ошибка" && (
-                <GhostButton onClick={() => run(b.id)}>
-                  <RefreshCw size={14} /> Повторить
-                </GhostButton>
-              )}
+              <div className="mt-3" style={{ color: BRAND.charcoal, fontSize: 14 }}>
+                {b.ai_profile?.summary || "ИИ-сводка пока не готова."}
+              </div>
             </div>
           </div>
         ))}
@@ -669,8 +836,6 @@ function AITab({
     </div>
   );
 }
-
-/* ---------- Orders admin ---------- */
 
 function OrdersTab({ orders, setOrders }: { orders: Order[]; setOrders: (o: Order[]) => void }) {
   const tone = (s: Order["status"]) =>
@@ -678,13 +843,12 @@ function OrdersTab({ orders, setOrders }: { orders: Order[]; setOrders: (o: Orde
 
   return (
     <div>
-      <SectionTitle>Заказы</SectionTitle>
+      <SectionTitle sub="Заказы остаются mock/local до Stage 16 Orders RPC.">Заказы</SectionTitle>
       <div className="hidden md:block rounded-xl border overflow-x-auto" style={{ background: "white", borderColor: BRAND.beige }}>
         <table className="w-full text-sm" style={{ minWidth: 760 }}>
           <thead>
             <tr style={{ color: BRAND.slate, background: BRAND.cream }}>
-              <Th>Заказ</Th><Th>Клиент</Th><Th>Дата</Th>
-              <Th>Сумма</Th><Th>Доставка</Th><Th>Статус</Th>
+              <Th>Заказ</Th><Th>Клиент</Th><Th>Дата</Th><Th>Сумма</Th><Th>Доставка</Th><Th>Статус</Th>
             </tr>
           </thead>
           <tbody>
@@ -700,17 +864,12 @@ function OrdersTab({ orders, setOrders }: { orders: Order[]; setOrders: (o: Orde
                     <StatusBadge status={o.status} tone={tone(o.status) as "ok" | "warn" | "err" | "info"} />
                     <select
                       value={o.status}
-                      onChange={(e) =>
-                        setOrders(orders.map((x) =>
-                          x.id === o.id ? { ...x, status: e.target.value as Order["status"] } : x
-                        ))
-                      }
+                      onChange={(e) => setOrders(orders.map((x) => x.id === o.id ? { ...x, status: e.target.value as Order["status"] } : x))}
                       className="rounded-md border px-2 py-1 bg-white"
                       style={{ borderColor: BRAND.lightGray, fontSize: 12 }}
                       aria-label={`Изменить статус заказа ${o.id}`}
                     >
-                      <option>создан</option><option>в обработке</option>
-                      <option>завершен</option><option>отменен</option>
+                      <option>создан</option><option>в обработке</option><option>завершен</option><option>отменен</option>
                     </select>
                   </div>
                 </Td>
@@ -722,8 +881,7 @@ function OrdersTab({ orders, setOrders }: { orders: Order[]; setOrders: (o: Orde
 
       <div className="md:hidden space-y-3">
         {orders.map((o) => (
-          <div key={o.id} className="rounded-xl border p-4"
-            style={{ background: "white", borderColor: BRAND.beige }}>
+          <div key={o.id} className="rounded-xl border p-4" style={{ background: "white", borderColor: BRAND.beige }}>
             <div className="flex items-center justify-between">
               <div style={{ color: BRAND.navy }}>{o.id}</div>
               <StatusBadge status={o.status} tone={tone(o.status) as "ok" | "warn" | "err" | "info"} />
@@ -734,18 +892,6 @@ function OrdersTab({ orders, setOrders }: { orders: Order[]; setOrders: (o: Orde
               <CardKV label="Сумма">{o.total} ₽</CardKV>
               <CardKV label="Доставка">{o.deliveryType}</CardKV>
             </dl>
-            <select
-              value={o.status}
-              onChange={(e) => setOrders(orders.map((x) =>
-                x.id === o.id ? { ...x, status: e.target.value as Order["status"] } : x
-              ))}
-              className="mt-3 w-full rounded-md border px-2 py-2 bg-white"
-              style={{ borderColor: BRAND.lightGray, fontSize: 13 }}
-              aria-label={`Изменить статус заказа ${o.id}`}
-            >
-              <option>создан</option><option>в обработке</option>
-              <option>завершен</option><option>отменен</option>
-            </select>
           </div>
         ))}
       </div>
@@ -753,27 +899,20 @@ function OrdersTab({ orders, setOrders }: { orders: Order[]; setOrders: (o: Orde
   );
 }
 
-/* ---------- Logs ---------- */
-
 function LogsTab() {
   const logs = [
-    { ts: "2026-05-02 09:14", level: "info", msg: "ИИ-анализ b5: статус Выполняется" },
-    { ts: "2026-05-02 08:55", level: "warn", msg: "Запрос к /api/v1/recommendations: 4.3 секунды" },
-    { ts: "2026-05-01 22:10", level: "error", msg: "ИИ-анализ b8 завершился ошибкой (timeout)" },
-    { ts: "2026-05-01 18:02", level: "info", msg: "Создан заказ ORD-1060" },
+    { ts: "2026-05-11 13:20", level: "info", msg: "Stage 12: Admin CRUD работает через Supabase RPC" },
+    { ts: "2026-05-11 13:15", level: "info", msg: "Storage bucket book-covers используется только для публичных обложек" },
+    { ts: "2026-05-11 13:10", level: "warn", msg: "ИИ-анализ не запускается до Stage 17" },
   ];
   return (
     <div>
       <SectionTitle>Логи</SectionTitle>
       <div className="rounded-xl border overflow-hidden" style={{ background: "white", borderColor: BRAND.beige }}>
         {logs.map((l, i) => (
-          <div key={i} className="px-5 py-3 border-b grid grid-cols-[140px_70px_1fr] gap-3"
-            style={{ borderColor: BRAND.beige, fontSize: 13, color: BRAND.charcoal }}>
+          <div key={i} className="px-5 py-3 border-b grid grid-cols-[140px_70px_1fr] gap-3" style={{ borderColor: BRAND.beige, fontSize: 13, color: BRAND.charcoal }}>
             <span style={{ color: BRAND.gray }}>{l.ts}</span>
-            <span style={{
-              color: l.level === "error" ? "#8C2A2A" : l.level === "warn" ? "#6B4E12" : BRAND.slate,
-              textTransform: "uppercase", letterSpacing: "0.04em",
-            }}>{l.level}</span>
+            <span style={{ color: l.level === "error" ? "#8C2A2A" : l.level === "warn" ? "#6B4E12" : BRAND.slate, textTransform: "uppercase", letterSpacing: "0.04em" }}>{l.level}</span>
             <span>{l.msg}</span>
           </div>
         ))}
@@ -782,33 +921,34 @@ function LogsTab() {
   );
 }
 
-/* ---------- shared bits ---------- */
-
 function Th({ children }: { children?: ReactNode }) {
   return <th className="text-left px-5 py-3" style={{ fontSize: 12, letterSpacing: "0.04em", textTransform: "uppercase" }}>{children}</th>;
 }
+
 function Td({ children }: { children?: ReactNode }) {
   return <td className="px-5 py-3" style={{ color: BRAND.charcoal }}>{children}</td>;
 }
-function IconBtn({ children, onClick, aria }: { children: ReactNode; onClick: () => void; aria: string }) {
+
+function IconBtn({ children, onClick, aria, disabled }: { children: ReactNode; onClick: () => void; aria: string; disabled?: boolean }) {
   return (
-    <button onClick={onClick} aria-label={aria}
-      className="p-2 rounded-md border"
-      style={{ borderColor: BRAND.lightGray, color: BRAND.slate, background: "white" }}>
+    <button onClick={onClick} aria-label={aria} disabled={disabled} className="p-2 rounded-md border disabled:opacity-50" style={{ borderColor: BRAND.lightGray, color: BRAND.slate, background: "white" }}>
       {children}
     </button>
   );
 }
-function AField({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) {
+
+function AField({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: ReactNode }) {
   return (
     <label className="block">
       <span style={{ color: BRAND.darkSlate, fontSize: 14, display: "block", marginBottom: 6 }}>
         {label}{required && <span style={{ color: "#8C2A2A" }}> *</span>}
       </span>
       {children}
+      {error && <span style={{ color: "#8C2A2A", fontSize: 12, marginTop: 5, display: "block" }}>{error}</span>}
     </label>
   );
 }
+
 function CardKV({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>

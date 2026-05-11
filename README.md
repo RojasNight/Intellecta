@@ -17,21 +17,30 @@
 
 ## Current stage/status
 
-Текущий этап: **Stage 11 — техническая стабилизация репозитория**.
+Текущий этап: **Stage 12 — полноценный Admin CRUD книг в Supabase**.
 
 Готово на предыдущих этапах:
 
 - Supabase Auth для регистрации, входа, выхода и определения роли пользователя.
-- Чтение каталога через `public.book_catalog_view`.
+- Чтение публичного каталога через `public.book_catalog_view`.
 - Поддержка Supabase Storage bucket `book-covers` для обложек.
 - Vercel SPA routing через `vercel.json`.
+- Stage 11: стабилизированы npm, lockfile, env, README и Vercel build setup.
+- Stage 11A: базовый security/RLS hardening считается выполненным.
 
-Пока не переносится в рамках Stage 11:
+Готово на Stage 12:
 
-- Admin CRUD для книг.
+- Admin CRUD книг выполняется через Supabase RPC, а не через mock/local state.
+- Создание и редактирование книг сохраняет `books`, `book_authors`, `book_genres`.
+- Скрытие и восстановление книг работает через `books.is_active`.
+- Обложки загружаются/заменяются через bucket `book-covers`, public URL сохраняется в `books.cover_url`.
+- При создании книги или изменении описания AI-профиль помечается как `pending` для будущего Stage 17.
+
+Пока не переносится в рамках Stage 12:
+
 - Preferences/Favorites/Cart/Orders на Supabase.
 - Реальный AI-analysis job pipeline.
-- Stage 11A RLS/security baseline для бизнес-таблиц.
+- pgvector/semantic search.
 
 ## Local development in VS Code
 
@@ -144,6 +153,7 @@ SQL-скрипты находятся в `supabase/sql/` и применяютс
 14. `11_verify_catalog.sql` — проверка каталога.
 15. `13_storage_book_covers.sql` — bucket `book-covers` и Storage policies.
 16. `14_verify_storage_book_covers.sql` — проверка Storage setup.
+17. `15_admin_book_crud_rpc.sql` — Stage 12 RPC для админского CRUD книг, связей авторов/жанров и pending AI-профиля.
 
 В папке есть два файла с номером `08_`. На Stage 11 SQL-логику не меняем и файлы не переименовываем, чтобы не ломать существующие ссылки. Порядок выше фиксирует безопасную последовательность запуска.
 
@@ -257,12 +267,78 @@ Vercel:
 - Открыть основные SPA routes напрямую.
 - Проверить browser console.
 
-## Stage 11A backlog
+## Stage 12 — Admin CRUD books
 
-Stage 11A должен быть отдельным этапом и не входит в текущую стабилизацию:
+Stage 12 реализует реальное управление книгами в Supabase без service role key во frontend. Все операции выполняются из браузера через Supabase anon key, authenticated session и серверные RPC-функции, которые проверяют `public.is_admin()`.
 
-- RLS/security baseline для `favorites`, `cart_items`, `orders`, `order_items`, `reviews`, `user_events`, `ai_analysis_jobs`.
-- RPC/transaction для оформления заказа.
-- Защищенный admin CRUD поверх Supabase.
-- Перенос preferences/favorites/cart/orders из local state в Supabase.
-- Реальный AI-analysis job lifecycle.
+### Используемые таблицы
+
+- `public.books`
+- `public.authors`
+- `public.genres`
+- `public.book_authors`
+- `public.book_genres`
+- `public.book_ai_profiles`
+- `storage.objects` bucket `book-covers`
+
+### Реализованные операции
+
+- Создать книгу.
+- Отредактировать книгу.
+- Назначить авторов и жанры.
+- Скрыть книгу через `is_active = false`.
+- Восстановить книгу через `is_active = true`.
+- Загрузить, заменить или удалить ссылку на обложку.
+- Пометить AI-профиль как `pending` при создании книги или изменении описания.
+
+### SQL для Stage 12
+
+Перед проверкой админки выполните в Supabase SQL Editor:
+
+```sql
+-- supabase/sql/15_admin_book_crud_rpc.sql
+```
+
+Скрипт добавляет RPC:
+
+- `admin_get_books()`
+- `admin_get_book(uuid)`
+- `admin_create_book(jsonb, uuid[], uuid[])`
+- `admin_update_book(uuid, jsonb, uuid[], uuid[])`
+- `admin_set_book_authors(uuid, uuid[])`
+- `admin_set_book_genres(uuid, uuid[])`
+- `admin_soft_delete_book(uuid)`
+- `admin_restore_book(uuid)`
+- `admin_mark_book_ai_profile_pending(uuid)`
+
+### Как назначить admin
+
+1. Зарегистрируйте пользователя через приложение.
+2. Выполните `06_set_admin_example.sql`, заменив email-заглушку на реальный email пользователя.
+3. Выйдите и войдите снова, чтобы frontend получил обновленную роль.
+
+### Как проверить CRUD
+
+1. Откройте `/admin` под пользователем с ролью `admin`.
+2. Перейдите во вкладку «Книги».
+3. Создайте книгу, выберите существующих авторов и жанры.
+4. Загрузите JPG/PNG/WebP обложку до 5 MB.
+5. Проверьте, что активная книга появилась в `/catalog`.
+6. Отредактируйте цену, описание или обложку.
+7. Проверьте карточку книги `/book/<slug>`.
+8. Скрыть книгу — она должна исчезнуть из публичного каталога, но остаться в админке.
+9. Восстановить книгу — она снова должна появиться в публичном каталоге.
+
+### Ограничения до Stage 17
+
+- Кнопки реального запуска AI-analysis нет.
+- `book_ai_profiles.status = pending` означает, что книге нужен будущий анализ.
+- Embedding/pgvector и semantic ranking не реализуются на Stage 12.
+
+## Next stages backlog
+
+- Stage 13: Preferences в Supabase.
+- Stage 14: Favorites в Supabase.
+- Stage 15: Cart в Supabase.
+- Stage 16: Orders RPC и транзакционное оформление заказа.
+- Stage 17: AI-analysis lifecycle, jobs, worker/edge function и embeddings.

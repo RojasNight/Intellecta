@@ -421,21 +421,29 @@ export function PrimaryButton({
 }
 
 export function GhostButton({
-  children, onClick, full, ariaLabel, type,
+  children, onClick, full, ariaLabel, type, disabled,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   full?: boolean;
   ariaLabel?: string;
   type?: "button" | "submit";
+  disabled?: boolean;
 }) {
   return (
     <button
       type={type || "button"}
       onClick={onClick}
+      disabled={disabled}
       aria-label={ariaLabel}
       className={`rounded-md px-5 py-3 inline-flex items-center justify-center gap-2 border ${full ? "w-full" : ""}`}
-      style={{ background: "white", color: BRAND.navy, borderColor: BRAND.lightGray }}
+      style={{
+        background: "white",
+        color: disabled ? BRAND.gray : BRAND.navy,
+        borderColor: BRAND.lightGray,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.75 : 1,
+      }}
     >
       {children}
     </button>

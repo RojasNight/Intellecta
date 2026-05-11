@@ -36,6 +36,10 @@
 15. `13_storage_book_covers.sql` — bucket `book-covers`, публичное чтение, загрузка/обновление/удаление только для admin.
 16. `14_verify_storage_book_covers.sql` — проверка bucket и Storage policies.
 
+### Stage 12: Admin CRUD книг
+
+17. `15_admin_book_crud_rpc.sql` — RPC-функции для создания, редактирования, скрытия, восстановления книг, синхронизации авторов/жанров и pending AI-профиля.
+
 ## Важные правила
 
 - Не используйте service role key во frontend.
@@ -44,3 +48,13 @@
 - Обложки доступны публично для чтения, потому что это витринные изображения каталога.
 - Загружать, заменять и удалять обложки может только пользователь с ролью `admin` в `public.profiles`.
 - Если обложка не загружена, frontend показывает спокойную fallback-обложку.
+
+## Stage 12 проверки
+
+После запуска `15_admin_book_crud_rpc.sql` проверьте под admin-пользователем:
+
+```sql
+select count(*) from public.admin_get_books();
+```
+
+Обычный authenticated user без роли `admin` не должен получать доступ к admin RPC-операциям изменения каталога.
