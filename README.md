@@ -17,7 +17,7 @@
 
 ## Current stage/status
 
-Текущий этап: **Stage 12 — полноценный Admin CRUD книг в Supabase**.
+Текущий этап: **Stage 13 — сохранение профиля предпочтений пользователя в Supabase**.
 
 Готово на предыдущих этапах:
 
@@ -36,9 +36,20 @@
 - Обложки загружаются/заменяются через bucket `book-covers`, public URL сохраняется в `books.cover_url`.
 - При создании книги или изменении описания AI-профиль помечается как `pending` для будущего Stage 17.
 
-Пока не переносится в рамках Stage 12:
+Готово на Stage 13:
 
-- Preferences/Favorites/Cart/Orders на Supabase.
+- Профиль предпочтений пользователя загружается из `public.user_preferences`.
+- Сохранение preferences выполняется через Supabase `upsert` по `user_id`, а не только через React state.
+- После reload и logout/login preferences остаются сохраненными.
+- При смене аккаунта локальный user-specific state preferences очищается, чтобы не показывать данные прошлого пользователя.
+- Добавлен service layer `preferencesService`.
+- Добавлен SQL-скрипт для own-only RLS на `user_preferences`.
+
+Пока не переносится в рамках Stage 13:
+
+- Favorites/Cart/Orders на Supabase.
+- Полноценные рекомендации из Supabase.
+- User events.
 - Реальный AI-analysis job pipeline.
 - pgvector/semantic search.
 
@@ -130,6 +141,47 @@ NEXT_PUBLIC_
 - Максимальный размер файла на frontend: 5 MB.
 - После загрузки public URL должен сохраняться в `public.books.cover_url`.
 
+### Stage 13 — User preferences in Supabase
+
+Preferences пользователя хранятся в таблице `public.user_preferences`. Frontend использует только Supabase anon key и RLS; service role key не нужен и запрещен.
+
+Сохраняемые поля:
+
+- `user_id` — `auth.uid()` текущего пользователя;
+- `genres` — JSON-массив выбранных жанров;
+- `topics` — JSON-массив тем;
+- `goals` — JSON-массив целей чтения;
+- `complexity_min`;
+- `complexity_max`;
+- `excluded_genres` — JSON-массив исключенных жанров.
+
+Frontend service:
+
+- `getUserPreferences()`;
+- `upsertUserPreferences(input)`;
+- `resetUserPreferences()`;
+- `hasUserPreferences()`;
+- `normalizePreferences(row)`;
+- `mapPreferencesToDb(input, userId)`.
+
+RLS:
+
+- пользователь может читать только `user_preferences.user_id = auth.uid()`;
+- пользователь может insert/update/delete только свою строку;
+- admin не получает отдельного права менять чужие личные preferences на этом этапе.
+
+Проверка Stage 13:
+
+1. Войти пользователем.
+2. Открыть `/preferences`.
+3. Заполнить жанры, темы, цели и сложность.
+4. Нажать «Сохранить».
+5. Перезагрузить страницу и снова открыть `/preferences`.
+6. Выйти и войти снова — значения должны сохраниться.
+7. Войти другим аккаунтом — preferences первого пользователя не должны отображаться.
+
+Stage 14 перенесет Favorites, а Stage 19 будет использовать эти preferences для рекомендаций из Supabase.
+
 ## SQL scripts order
 
 SQL-скрипты находятся в `supabase/sql/` и применяются через **Supabase SQL Editor**.
@@ -154,6 +206,7 @@ SQL-скрипты находятся в `supabase/sql/` и применяютс
 15. `13_storage_book_covers.sql` — bucket `book-covers` и Storage policies.
 16. `14_verify_storage_book_covers.sql` — проверка Storage setup.
 17. `15_admin_book_crud_rpc.sql` — Stage 12 RPC для админского CRUD книг, связей авторов/жанров и pending AI-профиля.
+18. `16_user_preferences_rls.sql` — Stage 13 own-only RLS для `public.user_preferences`.
 
 В папке есть два файла с номером `08_`. На Stage 11 SQL-логику не меняем и файлы не переименовываем, чтобы не ломать существующие ссылки. Порядок выше фиксирует безопасную последовательность запуска.
 

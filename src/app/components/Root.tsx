@@ -18,7 +18,7 @@ interface AppContextValue {
   removeItem: (id: string) => void;
   clearCart: () => void;
   preferences: Preferences | null;
-  setPreferences: (p: Preferences) => void;
+  setPreferences: (p: Preferences | null) => void;
   orders: Order[];
   setOrders: (orders: Order[] | ((prev: Order[]) => Order[])) => void;
   aiAvailable: boolean;
@@ -53,6 +53,10 @@ export function Root() {
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [location.pathname]);
+
+  useEffect(() => {
+    setPreferences(null);
+  }, [profile?.id]);
 
   const toggleFav = (id: string) => {
     const was = favorites.includes(id);

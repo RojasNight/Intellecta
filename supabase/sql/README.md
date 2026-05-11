@@ -40,6 +40,10 @@
 
 17. `15_admin_book_crud_rpc.sql` — RPC-функции для создания, редактирования, скрытия, восстановления книг, синхронизации авторов/жанров и pending AI-профиля.
 
+### Stage 13: профиль предпочтений пользователя
+
+18. `16_user_preferences_rls.sql` — сужает RLS для `public.user_preferences` до owner-only доступа: `user_id = auth.uid()` для select/insert/update/delete.
+
 ## Важные правила
 
 - Не используйте service role key во frontend.
@@ -58,3 +62,24 @@ select count(*) from public.admin_get_books();
 ```
 
 Обычный authenticated user без роли `admin` не должен получать доступ к admin RPC-операциям изменения каталога.
+
+
+## Stage 13 проверки
+
+После запуска `16_user_preferences_rls.sql` проверьте через приложение:
+
+1. Авторизованный пользователь может сохранить preferences на странице `/preferences`.
+2. В `public.user_preferences` появляется или обновляется строка с `user_id` текущего пользователя.
+3. После reload и logout/login значения снова загружаются.
+4. Другой пользователь не видит preferences первого пользователя.
+5. Неавторизованный пользователь перенаправляется на login и не может сохранить preferences.
+
+Для ручной SQL-проверки структуры:
+
+```sql
+select user_id, genres, topics, goals, complexity_min, complexity_max, excluded_genres, updated_at
+from public.user_preferences
+order by updated_at desc nulls last;
+```
+
+SQL Editor может выполняться без app auth-сессии, поэтому RLS-поведение надежнее проверять из приложения под реальными пользователями.

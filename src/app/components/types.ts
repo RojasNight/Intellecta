@@ -56,6 +56,26 @@ export interface Preferences {
   excludedGenres: string[];
 }
 
+export interface UserPreferences extends Preferences {
+  userId: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UserPreferencesRow {
+  user_id: string;
+  genres: unknown;
+  topics: unknown;
+  goals: unknown;
+  complexity_min: number | null;
+  complexity_max: number | null;
+  excluded_genres: unknown;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface UpdateUserPreferencesInput extends Preferences {}
+
 export interface Order {
   id: string;
   status: "создан" | "в обработке" | "завершен" | "отменен";
