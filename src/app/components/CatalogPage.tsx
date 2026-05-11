@@ -55,7 +55,9 @@ export function CatalogPage() {
     })
       .then((books) => {
         if (!cancelled) {
-          console.info("[Интеллекта][catalog] UI получил книги из Supabase", { count: books.length });
+          if (import.meta.env.DEV) {
+            console.info("[Интеллекта][catalog] UI получил книги из Supabase", { count: books.length });
+          }
           setResults(books);
         }
       })

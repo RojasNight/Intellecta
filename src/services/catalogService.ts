@@ -201,9 +201,11 @@ async function fetchCatalogRows(): Promise<CatalogViewRow[]> {
   }
 
   const supabase = getSupabaseClient();
-  console.info("[Интеллекта][catalog] Запрашиваем каталог из Supabase", {
-    source: "book_catalog_view",
-  });
+  if (import.meta.env.DEV) {
+    console.info("[Интеллекта][catalog] Запрашиваем каталог из Supabase", {
+      source: "book_catalog_view",
+    });
+  }
 
   const { data, error } = await supabase
     .from("book_catalog_view")
@@ -220,10 +222,12 @@ async function fetchCatalogRows(): Promise<CatalogViewRow[]> {
     throw error;
   }
 
-  console.info("[Интеллекта][catalog] Получен ответ Supabase", {
-    source: "book_catalog_view",
-    count: data?.length ?? 0,
-  });
+  if (import.meta.env.DEV) {
+    console.info("[Интеллекта][catalog] Получен ответ Supabase", {
+      source: "book_catalog_view",
+      count: data?.length ?? 0,
+    });
+  }
 
   return (data ?? []) as CatalogViewRow[];
 }

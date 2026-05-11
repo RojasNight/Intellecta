@@ -47,6 +47,8 @@ export function getSupabaseConfig(): SupabaseConfig {
 }
 
 export function logSupabaseConfigState(source = "supabase") {
+  if (!import.meta.env.DEV) return;
+
   const config = getSupabaseConfig();
 
   console.info(`[Интеллекта][${source}] Supabase config`, {
@@ -96,10 +98,12 @@ export function getSupabaseClient(): SupabaseClient {
   }
 
   if (!client) {
-    console.info("[Интеллекта][supabase] Создаем Supabase client", {
-      urlHost: safeUrlHost(url),
-      anonKeyPresent: true,
-    });
+    if (import.meta.env.DEV) {
+      console.info("[Интеллекта][supabase] Создаем Supabase client", {
+        urlHost: safeUrlHost(url),
+        anonKeyPresent: true,
+      });
+    }
 
     client = createClient(url, anonKey, {
       auth: {

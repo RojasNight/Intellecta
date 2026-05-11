@@ -18,22 +18,56 @@ export type AuthResult = {
 
 type DebugPayload = Record<string, unknown>;
 
+function isSensitivePayloadKey(key: string) {
+  const normalized = key.toLowerCase();
+  return (
+    normalized.includes("email") ||
+    normalized.includes("password") ||
+    normalized.includes("token") ||
+    normalized.includes("jwt") ||
+    normalized.includes("session") ||
+    normalized.includes("key")
+  );
+}
+
+function sanitizeDebugPayload(payload?: DebugPayload): DebugPayload {
+  if (!payload) return {};
+
+  return Object.fromEntries(
+    Object.entries(payload).map(([key, value]) => [key, isSensitivePayloadKey(key) ? "[redacted]" : value]),
+  );
+}
+
 function debugInfo(message: string, payload?: DebugPayload) {
-  console.info(`[Интеллекта][auth] ${message}`, payload ?? {});
+  if (!import.meta.env.DEV) return;
+  console.info(`[Интеллекта][auth] ${message}`, sanitizeDebugPayload(payload));
 }
 
 function debugWarn(message: string, payload?: DebugPayload) {
-  console.warn(`[Интеллекта][auth] ${message}`, payload ?? {});
+  if (!import.meta.env.DEV) return;
+  console.warn(`[Интеллекта][auth] ${message}`, sanitizeDebugPayload(payload));
 }
 
 function debugError(message: string, error: unknown, payload?: DebugPayload) {
   const authError = error as Partial<AuthError> | null;
-  console.error(`[Интеллекта][auth] ${message}`, {
-    ...payload,
+  const sanitizedPayload = sanitizeDebugPayload(payload);
+  const logPayload = {
+    ...sanitizedPayload,
     errorName: error instanceof Error ? error.name : undefined,
     errorMessage: error instanceof Error ? error.message : String(error ?? ""),
     supabaseStatus: authError?.status,
     supabaseCode: authError?.code,
+  };
+
+  if (import.meta.env.DEV) {
+    console.error(`[Интеллекта][auth] ${message}`, logPayload);
+    return;
+  }
+
+  console.error(`[Интеллекта][auth] ${message}`, {
+    errorName: logPayload.errorName,
+    supabaseStatus: logPayload.supabaseStatus,
+    supabaseCode: logPayload.supabaseCode,
   });
 }
 

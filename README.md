@@ -1,280 +1,268 @@
 # Интеллекта
 
-Фронтенд-прототип дипломного проекта «Интеллекта» — русскоязычный веб-сервис онлайн-продажи книг с ИИ-анализом содержания и объяснимыми рекомендациями.
+«Интеллекта» — frontend MVP дипломного проекта: веб-сервис онлайн-продажи книг с ИИ-анализом содержания, семантическим поиском и объяснимыми рекомендациями.
 
-## Технологии
+## Project stack
 
-- React
-- Vite
+- React 18
+- Vite 6
 - TypeScript
-- Vercel для хостинга
-- Supabase PostgreSQL / Auth / Storage для следующих этапов интеграции
+- React Router
+- Supabase JS client
+- Supabase Auth / PostgreSQL / Storage
+- Vercel для hosting и automatic deployment после push в GitHub
+- npm как основной package manager
 
-## Локальный запуск
+На текущем этапе приложение работает как React/Vite SPA и обращается к Supabase напрямую из браузера через публичный anon key. Service role key во frontend запрещен.
 
-Установите зависимости:
+## Current stage/status
+
+Текущий этап: **Stage 11 — техническая стабилизация репозитория**.
+
+Готово на предыдущих этапах:
+
+- Supabase Auth для регистрации, входа, выхода и определения роли пользователя.
+- Чтение каталога через `public.book_catalog_view`.
+- Поддержка Supabase Storage bucket `book-covers` для обложек.
+- Vercel SPA routing через `vercel.json`.
+
+Пока не переносится в рамках Stage 11:
+
+- Admin CRUD для книг.
+- Preferences/Favorites/Cart/Orders на Supabase.
+- Реальный AI-analysis job pipeline.
+- Stage 11A RLS/security baseline для бизнес-таблиц.
+
+## Local development in VS Code
+
+1. Откройте папку проекта в VS Code.
+2. Создайте `.env.local` на основе `.env.example`.
+3. Установите зависимости:
 
 ```bash
 npm install
 ```
 
-Запустите dev-сервер:
+4. Запустите dev-сервер:
 
 ```bash
 npm run dev
 ```
 
-Проверьте production-сборку:
+5. Откройте локальный URL из терминала Vite.
+6. Перед push проверьте production build:
 
 ```bash
 npm run build
 ```
 
-Предпросмотр production-сборки:
+7. При необходимости проверьте production build локально:
 
 ```bash
 npm run preview
 ```
 
-## Supabase
+## Environment variables
 
-Supabase подключен к Vercel через **Vercel Integrations**. После Stage 6 авторизация работает через Supabase Auth, а каталог, корзина, заказы, рекомендации и админские сценарии пока остаются mock-данными и будут переноситься на Supabase на следующих этапах.
+В репозитории должен коммититься только `.env.example`. Реальный `.env.local` не коммитится.
 
-Откройте **Vercel Project Settings → Environment Variables** и проверьте, какие переменные были созданы интеграцией Supabase.
-
-Для Vite переменные, которые используются во frontend-коде, должны начинаться с `VITE_`.
-
-Обязательные frontend-переменные:
-
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
-
-Если Vercel Integration создала переменные без префикса `VITE_`, например `SUPABASE_URL` или `SUPABASE_ANON_KEY`, добавьте Vite-версии переменных в Vercel или сопоставьте их при настройке окружения:
+Минимальные переменные для frontend:
 
 ```env
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_ANON_KEY=...
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
 ```
 
-Клиентский код также умеет читать публичные переменные `NEXT_PUBLIC_SUPABASE_URL` и `NEXT_PUBLIC_SUPABASE_ANON_KEY`, если они уже есть в окружении, но для этого проекта предпочтительны именно `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY`.
-
-Не используйте `SUPABASE_SERVICE_ROLE_KEY` во frontend-коде. Service role key нельзя раскрывать в браузере, коммитах, README, интерфейсе или логах.
-
-### Локальная настройка Supabase
-
-1. Создайте файл `.env.local` в корне проекта.
-2. Добавьте публичные переменные Supabase:
+Дополнительно поддерживаются публичные переменные Vercel/Supabase Integration:
 
 ```env
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_ANON_KEY=...
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
 ```
 
-3. Перезапустите dev-сервер после изменения `.env.local`:
+Правила безопасности:
 
-```bash
-npm run dev
+- `.env.local` не коммитится.
+- `.env.example` коммитится.
+- Production env-переменные задаются в **Vercel Project Settings → Environment Variables**.
+- После изменения env-переменных в Vercel нужен redeploy.
+- Во frontend разрешен только публичный Supabase URL и public/anon key.
+- `SUPABASE_SERVICE_ROLE_KEY` нельзя использовать во frontend, `.env.example`, README-примерах или Vercel client-side variables.
+- `DATABASE_URL`, private OpenAI/API keys и другие server-side secrets нельзя добавлять в браузерный bundle.
+
+## Supabase setup
+
+Supabase используется для Auth, PostgreSQL и Storage.
+
+Frontend читает переменные в таком порядке:
+
+1. `VITE_SUPABASE_URL`
+2. `NEXT_PUBLIC_SUPABASE_URL`
+3. `VITE_SUPABASE_ANON_KEY`
+4. `VITE_SUPABASE_PUBLISHABLE_KEY`
+5. `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+6. `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+
+Vite настроен на env prefixes:
+
+```text
+VITE_
+NEXT_PUBLIC_
 ```
 
-Не коммитьте `.env.local` и другие реальные env-файлы в Git. Для примера в репозитории оставлен только `.env.example` с placeholder-значениями.
+Не добавляйте prefix `SUPABASE_` в `vite.config.ts`, чтобы случайно не раскрыть server-side secrets.
 
-### Настройка Supabase-переменных в Vercel
+### Storage для обложек
 
-1. Supabase Integration может уже создать часть переменных автоматически.
-2. Откройте **Vercel Settings → Environment Variables**.
-3. Убедитесь, что `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY` существуют для **Production**, **Preview** и **Development**.
-4. Если переменных с `VITE_` нет, создайте их вручную на основе публичных Supabase Project URL и anon public key.
-5. Выполните redeploy проекта после изменений.
+- Bucket: `book-covers`.
+- Public read разрешен для витринных изображений.
+- Upload/update/delete разрешаются только admin-пользователю через Supabase session и policies.
+- Поддерживаемые форматы: JPG, PNG, WebP.
+- Максимальный размер файла на frontend: 5 MB.
+- После загрузки public URL должен сохраняться в `public.books.cover_url`.
 
-Для Vercel используйте настройки:
+## SQL scripts order
 
+SQL-скрипты находятся в `supabase/sql/` и применяются через **Supabase SQL Editor**.
+
+Рекомендуемый порядок восстановления проекта:
+
+0. `00_connection_check.sql` — необязательная проверка SQL Editor.
+1. `01_schema.sql` — базовые таблицы, связи и начальная модель.
+2. `02_indexes.sql` — индексы.
+3. `03_triggers.sql` — `updated_at` и создание профиля после регистрации.
+4. `04_rls_prepare.sql` — подготовка RLS и helper-функции.
+5. `99_verify_schema.sql` — проверка базовой схемы.
+6. `05_auth_roles.sql` — роли и auth/profile setup.
+7. `07_auth_rls.sql` — RLS для `profiles` и `user_preferences`.
+8. `06_set_admin_example.sql` — назначение первого администратора после регистрации пользователя.
+9. `08_catalog_fixes.sql` — безопасные уточнения каталожной схемы.
+10. `08_catalog_view_security.sql` — security-настройки для catalog view, если требуются текущей схемой.
+11. `09_catalog_view.sql` — `public.book_catalog_view` для frontend-каталога.
+12. `10_catalog_rls.sql` — RLS для каталожных таблиц.
+13. `12_seed_catalog.sql` — демо-каталог, авторы, жанры и AI-профили.
+14. `11_verify_catalog.sql` — проверка каталога.
+15. `13_storage_book_covers.sql` — bucket `book-covers` и Storage policies.
+16. `14_verify_storage_book_covers.sql` — проверка Storage setup.
+
+В папке есть два файла с номером `08_`. На Stage 11 SQL-логику не меняем и файлы не переименовываем, чтобы не ломать существующие ссылки. Порядок выше фиксирует безопасную последовательность запуска.
+
+## Vercel deployment
+
+Vercel подключен к GitHub-репозиторию и автоматически запускает build после push.
+
+Рекомендуемые настройки Vercel:
+
+- Framework Preset: Vite
 - Install Command: `npm install`
 - Build Command: `npm run build`
 - Output Directory: `dist`
 
-### SQL setup
+В Vercel Project Settings добавьте для Production/Preview/Development:
 
-Все изменения схемы базы данных должны применяться через **Supabase SQL Editor**. На следующих этапах используйте SQL-скрипты вместо ручного создания таблиц через UI.
-
-Папка для будущих SQL-скриптов:
-
-```text
-supabase/sql/
+```env
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
 ```
 
-В Stage 4 добавлен только безопасный проверочный скрипт:
+Можно использовать публичные переменные Supabase Integration:
 
-```text
-supabase/sql/00_connection_check.sql
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
 ```
 
-Он проверяет, что SQL Editor выполняет запросы, и не создает таблицы.
+После изменения env-переменных выполните redeploy. Если были проблемы с кешем, используйте redeploy without build cache.
 
+Для React/Vite SPA используется `vercel.json`, который переписывает все маршруты на `/index.html`. Прямое открытие этих маршрутов должно работать после deploy:
 
-## База данных Supabase / Stage 5
+- `/catalog`
+- `/book/:id`
+- `/admin`
+- `/checkout`
+- `/orders`
+- `/recommendations`
 
-Схема базы данных для MVP находится в папке:
+## Git workflow
 
-```text
-supabase/sql/
+Перед commit:
+
+```bash
+npm install
+npm run build
+git status
 ```
 
-Все изменения БД выполняются через **Supabase SQL Editor**, а не ручным созданием таблиц через UI. Для Stage 5 подготовлены скрипты:
+Commit и push:
 
-1. `00_connection_check.sql` — проверка SQL Editor;
-2. `01_schema.sql` — таблицы, связи, ограничения и представление каталога;
-3. `02_indexes.sql` — индексы;
-4. `03_triggers.sql` — `updated_at` и создание профиля после Supabase Auth-регистрации;
-5. `04_rls_prepare.sql` — подготовка к RLS и функция `public.is_admin()`;
-6. `99_verify_schema.sql` — проверка созданной схемы.
+```bash
+git add .
+git commit -m "chore: stabilize repo build and deployment setup"
+git push
+```
 
-После Stage 6 frontend использует Supabase Auth для регистрации, входа, выхода и определения роли. Каталог, корзина, заказы, рекомендации и админские данные пока остаются mock-данными и будут переноситься на Supabase на следующих этапах.
+После push:
 
-## Статус Supabase в разработке
+1. Откройте Vercel deployment logs.
+2. Убедитесь, что install и build завершились успешно.
+3. Откройте production URL.
+4. Проверьте прямые SPA routes.
+5. Проверьте browser console на отсутствие секретов, JWT, access token, session token и service role key.
 
-Компонент `SupabaseStatus` предназначен только для режима разработки. Он показывает только безопасное состояние конфигурации:
-
-- «Supabase подключен»
-- «Supabase не настроен»
-
-Ключи, service role key и другие секретные значения в интерфейсе не отображаются.
-
-## Важно для архива и Git
+## Files that must not be committed
 
 Не добавляйте в Git и архивы:
 
-- `node_modules`
-- `dist`
-- `.dist`
-- `build`
+- `node_modules/`
+- `dist/`
 - `.env`
 - `.env.local`
-- `.env.development.local`
-- `.env.test.local`
-- `.env.production.local`
+- `.env.*.local`
+- `.vercel/`
+- debug logs
+- OS/IDE мусор
 
-## Supabase Auth и роли / Stage 6
+Должны оставаться в Git:
 
-В Stage 6 проект использует **Supabase Auth email/password** для регистрации, входа и выхода. Роли приложения хранятся не в frontend-коде, а в таблице `public.profiles`.
+- `.env.example`
+- `package-lock.json`
+- `vercel.json`
+- `supabase/sql/*.sql`
 
-Роли:
+## Build checklist
 
-- `guest` — неавторизованный посетитель;
-- `user` — обычный пользователь;
-- `admin` — администратор.
+Local:
 
-Новые пользователи автоматически получают профиль в `public.profiles` и роль `user`. Это делает SQL-триггер `public.handle_new_user()` после регистрации в `auth.users`.
-
-Для Stage 6 выполните SQL-скрипты в Supabase SQL Editor:
-
-1. `supabase/sql/05_auth_roles.sql`
-2. `supabase/sql/07_auth_rls.sql`
-3. при необходимости `supabase/sql/08_catalog_view_security.sql`;
-4. зарегистрируйте пользователя через приложение;
-5. при необходимости назначьте администратора через `supabase/sql/06_set_admin_example.sql`.
-
-### Как создать первого администратора
-
-1. Зарегистрируйтесь через страницу регистрации приложения.
-2. Откройте Supabase Dashboard → SQL Editor.
-3. Откройте `supabase/sql/06_set_admin_example.sql`.
-4. Замените `admin@example.com` на email зарегистрированного пользователя.
-5. Выполните скрипт.
-6. Выйдите из приложения и войдите снова.
-
-Назначение роли администратора выполняется только через SQL Editor или защищенный backend. В публичном интерфейсе приложения нет инструкций, паролей или обходных способов получить роль администратора.
-
-### Безопасность Auth
-
-- Не используйте `SUPABASE_SERVICE_ROLE_KEY` во frontend-коде.
-- Не коммитьте реальные `.env`-файлы, токены и ключи.
-- Не показывайте JWT/session token в UI и логах.
-- Проверка admin-доступа выполняется по `public.profiles.role`, а не по email-префиксу.
-- Базовые RLS-политики для `profiles` и `user_preferences` находятся в `07_auth_rls.sql`.
-
-Vercel Integration уже подключена, но для Vite в браузере должны быть доступны переменные с префиксом `VITE_`:
-
-```env
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_ANON_KEY=...
+```bash
+npm install
+npm run dev
+npm run build
+npm run preview
 ```
 
-## Диагностика Supabase Auth на Vercel
+Git:
 
-Если регистрация или вход показывают сообщение «Не удалось подключиться к сервису авторизации», откройте DevTools → Console и Network.
-
-В Console приложение выводит безопасные диагностические сообщения с префиксами:
-
-- `[Интеллекта][supabase]`
-- `[Интеллекта][auth]`
-
-В логах показываются только безопасные признаки: наличие URL, наличие anon key, host Supabase URL, статус ошибки и код ошибки. Значения ключей, JWT и service role key не выводятся.
-
-Для Vite на Vercel должны быть доступны переменные:
-
-```env
-VITE_SUPABASE_URL=https://your-project-id.supabase.co
-VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+```bash
+git status
+git add .
+git commit -m "chore: stabilize repo build and deployment setup"
+git push
 ```
 
-После изменения переменных окружения в Vercel обязательно выполните новый деплой без кеша.
+Vercel:
 
-Для React Router SPA на Vercel используется файл `vercel.json`, который направляет все маршруты на `index.html`.
+- Проверить env variables.
+- Проверить build logs.
+- Проверить production URL.
+- Открыть основные SPA routes напрямую.
+- Проверить browser console.
 
+## Stage 11A backlog
 
-### Переменные Supabase из Vercel Integration
+Stage 11A должен быть отдельным этапом и не входит в текущую стабилизацию:
 
-В этом проекте Vite настроен так, чтобы читать публичные переменные с префиксами `VITE_` и `NEXT_PUBLIC_`. Поэтому текущие переменные Vercel Integration подходят, если в проекте есть:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_ANON_KEY=...
-```
-
-Также поддерживается новый публичный ключ Supabase:
-
-```env
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
-```
-
-Серверные переменные без публичного префикса, например `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `POSTGRES_URL`, не используются во frontend и не должны попадать в браузерный код. После изменения переменных на Vercel нужно выполнить Redeploy без build cache.
-
-## Каталог книг через Supabase
-
-Stage 7 переводит каталог, карточку книги, популярные книги на главной и смысловой поиск на данные Supabase. Frontend читает каталог через `src/services/catalogService.ts` и представление `public.book_catalog_view`.
-
-Скрипты для Supabase SQL Editor:
-
-1. `supabase/sql/08_catalog_fixes.sql` — безопасные уточнения схемы каталога.
-2. `supabase/sql/09_catalog_view.sql` — view для чтения каталога одним запросом.
-3. `supabase/sql/10_catalog_rls.sql` — RLS-политики для публичного чтения активных книг и админского управления.
-4. `supabase/sql/12_seed_catalog.sql` — демонстрационные книги, авторы, жанры и ИИ-профили.
-5. `supabase/sql/11_verify_catalog.sql` — проверка результата.
-
-Ограничения этапа:
-
-- Корзина и избранное пока остаются локальными/mock.
-- Заказы пока не сохраняются в Supabase.
-- Смысловой поиск на этом этапе эвристический: он ищет по названию, описанию, авторам, жанрам, `ai_topics` и `ai_keywords`. Векторный поиск через embedding будет подключен позже.
-- Не используйте service role key во frontend.
-
-## Обложки книг через Supabase Storage
-
-Stage 8 добавляет хранение обложек книг в Supabase Storage.
-
-- Bucket: `book-covers`.
-- Чтение обложек публичное, потому что это изображения витрины каталога.
-- Загрузка, замена и удаление доступны только администратору через Supabase session и RLS policies.
-- Поддерживаемые форматы: JPG, PNG, WebP.
-- Максимальный размер файла: 5 МБ.
-- После загрузки публичный URL сохраняется в поле `public.books.cover_url`.
-- Во frontend нельзя использовать `SUPABASE_SERVICE_ROLE_KEY` или другие секретные ключи.
-- Если Supabase подключен к Vercel через Integration, дополнительных service keys во frontend не нужно.
-- Если `cover_url` пустой или изображение не загрузилось, интерфейс показывает fallback-обложку.
-
-SQL-скрипты для настройки Storage находятся в `supabase/sql/`:
-
-1. `13_storage_book_covers.sql` — создает bucket `book-covers` и политики доступа.
-2. `14_verify_storage_book_covers.sql` — проверяет настройки bucket и policies.
-
-Запускайте SQL только через Supabase SQL Editor. Обложки для демо можно загрузить через админ-панель после заполнения каталога seed-данными.
+- RLS/security baseline для `favorites`, `cart_items`, `orders`, `order_items`, `reviews`, `user_events`, `ai_analysis_jobs`.
+- RPC/transaction для оформления заказа.
+- Защищенный admin CRUD поверх Supabase.
+- Перенос preferences/favorites/cart/orders из local state в Supabase.
+- Реальный AI-analysis job lifecycle.

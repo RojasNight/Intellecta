@@ -26,7 +26,9 @@ export function HomePage() {
     getCatalogBooks({ sort: "rating", limit: 4 })
       .then((books) => {
         if (!cancelled) {
-          console.info("[Интеллекта][home] Популярные книги загружены из Supabase", { count: books.length });
+          if (import.meta.env.DEV) {
+            console.info("[Интеллекта][home] Популярные книги загружены из Supabase", { count: books.length });
+          }
           setPopular(books);
         }
       })

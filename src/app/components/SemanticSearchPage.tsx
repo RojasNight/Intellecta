@@ -78,7 +78,9 @@ export function SemanticSearchPage() {
     searchCatalogBooks({ q: query, limit: 40 })
       .then((books) => {
         if (!cancelled) {
-          console.info("[Интеллекта][semantic-search] Книги загружены из Supabase", { count: books.length });
+          if (import.meta.env.DEV) {
+            console.info("[Интеллекта][semantic-search] Книги загружены из Supabase", { count: books.length });
+          }
           setCatalogBooks(books);
         }
       })

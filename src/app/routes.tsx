@@ -24,16 +24,18 @@ function ProtectedRoute({
   const location = useLocation();
   const { loading, isAuthenticated, role, isAdmin, profile } = useAuth();
 
-  console.info("[Интеллекта][route] ProtectedRoute", {
-    path: location.pathname,
-    requiredRoles: roles ?? null,
-    loading,
-    isAuthenticated,
-    isAdmin,
-    role,
-    profileRole: profile?.role ?? null,
-    profileEmail: profile?.email ?? null,
-  });
+  if (import.meta.env.DEV) {
+    console.info("[Интеллекта][route] ProtectedRoute", {
+      path: location.pathname,
+      requiredRoles: roles ?? null,
+      loading,
+      isAuthenticated,
+      isAdmin,
+      role,
+      profileRole: profile?.role ?? null,
+      profileLoaded: Boolean(profile),
+    });
+  }
 
   if (loading) {
     return (
