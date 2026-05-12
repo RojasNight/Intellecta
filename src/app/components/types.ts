@@ -29,6 +29,30 @@ export interface Book {
   ai: BookAIProfile;
 }
 
+
+export interface FavoriteRow {
+  user_id: string;
+  book_id: string;
+  created_at?: string;
+}
+
+export interface FavoriteBook extends Book {}
+
+export interface FavoriteState {
+  favoriteBookIds: string[];
+  favoriteBooks: FavoriteBook[];
+  loading: boolean;
+  error: string | null;
+}
+
+export interface AddFavoriteInput {
+  bookId: string;
+}
+
+export interface RemoveFavoriteInput {
+  bookId: string;
+}
+
 export interface CartItem {
   bookId: string;
   qty: number;

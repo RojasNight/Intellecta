@@ -12,7 +12,7 @@ export function HomePage() {
   const [popular, setPopular] = useState<Book[]>([]);
   const [loadingPopular, setLoadingPopular] = useState(true);
   const navigate = useNavigate();
-  const { toggleFav, favorites, addToCart, setSearchQuery } = useAppContext();
+  const { toggleFav, favorites, favoritePendingIds, addToCart, setSearchQuery } = useAppContext();
 
   const submit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -178,6 +178,7 @@ export function HomePage() {
                 key={b.id}
                 book={b}
                 isFav={favorites.includes(b.id)}
+                favoriteDisabled={favoritePendingIds.includes(b.id)}
                 onToggleFav={() => toggleFav(b.id)}
                 onAddToCart={() => addToCart(b.id)}
                 onOpen={() => navigate(`/book/${b.slug || b.id}`)}

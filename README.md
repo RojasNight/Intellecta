@@ -17,7 +17,7 @@
 
 ## Current stage/status
 
-Текущий этап: **Stage 13 — сохранение профиля предпочтений пользователя в Supabase**.
+Текущий этап: **Stage 14 — избранное пользователя через Supabase**.
 
 Готово на предыдущих этапах:
 
@@ -45,9 +45,18 @@
 - Добавлен service layer `preferencesService`.
 - Добавлен SQL-скрипт для own-only RLS на `user_preferences`.
 
-Пока не переносится в рамках Stage 13:
+Готово на Stage 14:
 
-- Favorites/Cart/Orders на Supabase.
+- Избранное пользователя хранится в `public.favorites`, а не только в React state.
+- Favorite IDs загружаются после входа пользователя и очищаются при logout/смене аккаунта.
+- Каталог, карточка книги, главная, поиск и страница избранного используют общий Supabase-backed favorite state.
+- Страница `/favorites` загружает активные книги через `book_catalog_view`; скрытые книги не показываются пользователю.
+- Добавлен service layer `favoritesService`.
+- Добавлен SQL-скрипт для own-only RLS на `favorites`.
+
+Пока не переносится в рамках Stage 14:
+
+- Cart/Orders на Supabase.
 - Полноценные рекомендации из Supabase.
 - User events.
 - Реальный AI-analysis job pipeline.
@@ -180,7 +189,50 @@ RLS:
 6. Выйти и войти снова — значения должны сохраниться.
 7. Войти другим аккаунтом — preferences первого пользователя не должны отображаться.
 
-Stage 14 перенесет Favorites, а Stage 19 будет использовать эти preferences для рекомендаций из Supabase.
+Stage 14 переносит Favorites, а Stage 19 будет использовать preferences и favorites для рекомендаций из Supabase.
+
+### Stage 14 — Favorites in Supabase
+
+Избранное пользователя хранится в таблице `public.favorites`. Frontend использует только Supabase anon key и RLS; service role key не нужен и запрещен.
+
+Сохраняемые поля:
+
+- `user_id` — `auth.uid()` текущего пользователя;
+- `book_id` — UUID книги из `public.books`;
+- `created_at` — дата добавления.
+
+Frontend service:
+
+- `getFavorites()`;
+- `getFavoriteBookIds()`;
+- `getFavoriteBooks()`;
+- `addFavorite(bookId)`;
+- `removeFavorite(bookId)`;
+- `isFavorite(bookId)`;
+- `toggleFavorite(bookId)`;
+- `clearFavorites()`;
+- `normalizeFavoriteRow(row)`.
+
+RLS:
+
+- пользователь может читать только `favorites.user_id = auth.uid()`;
+- пользователь может insert только свою строку;
+- пользователь может delete только свою строку;
+- guest не может создавать избранное;
+- `primary key (user_id, book_id)` защищает от дублей.
+
+Проверка Stage 14:
+
+1. Войти пользователем.
+2. Открыть `/catalog`.
+3. Добавить книгу в избранное.
+4. Открыть `/favorites` — книга должна отображаться.
+5. Перезагрузить страницу — книга должна остаться.
+6. Удалить книгу из избранного и снова перезагрузить страницу.
+7. Войти другим аккаунтом — избранное первого пользователя не должно отображаться.
+8. Выйти и нажать favorite в каталоге — приложение должно предложить войти.
+
+Stage 15 перенесет Cart, Stage 19 будет использовать favorites для рекомендаций из Supabase.
 
 ## SQL scripts order
 
@@ -207,6 +259,7 @@ SQL-скрипты находятся в `supabase/sql/` и применяютс
 16. `14_verify_storage_book_covers.sql` — проверка Storage setup.
 17. `15_admin_book_crud_rpc.sql` — Stage 12 RPC для админского CRUD книг, связей авторов/жанров и pending AI-профиля.
 18. `16_user_preferences_rls.sql` — Stage 13 own-only RLS для `public.user_preferences`.
+19. `17_favorites_rls.sql` — Stage 14 own-only RLS для `public.favorites`.
 
 В папке есть два файла с номером `08_`. На Stage 11 SQL-логику не меняем и файлы не переименовываем, чтобы не ломать существующие ссылки. Порядок выше фиксирует безопасную последовательность запуска.
 
@@ -388,10 +441,45 @@ Stage 12 реализует реальное управление книгами
 - `book_ai_profiles.status = pending` означает, что книге нужен будущий анализ.
 - Embedding/pgvector и semantic ranking не реализуются на Stage 12.
 
+## Stage 14 — Favorites in Supabase
+
+Stage 14 реализует настоящее избранное в Supabase без service role key во frontend. Source of truth — таблица `public.favorites`; React state используется только как cache текущей сессии.
+
+### Используемые таблицы и view
+
+- `public.favorites`
+- `public.books`
+- `public.book_catalog_view`
+- `public.profiles` через Supabase Auth session
+
+### SQL для Stage 14
+
+Перед проверкой выполните в Supabase SQL Editor:
+
+```sql
+-- supabase/sql/17_favorites_rls.sql
+```
+
+Скрипт включает RLS для `favorites`, удаляет возможные широкие policies и создает owner-only policies для select/insert/delete.
+
+### Как проверить избранное
+
+1. Войти обычным пользователем.
+2. Открыть `/catalog` и добавить активную книгу в избранное.
+3. Проверить строку в `public.favorites` с `user_id` текущего пользователя и UUID книги.
+4. Открыть `/favorites`, перезагрузить страницу и убедиться, что книга осталась.
+5. Удалить книгу из избранного, перезагрузить страницу и убедиться, что она не вернулась.
+6. Повторить под другим аккаунтом — списки должны быть разными.
+7. Выйти и попробовать добавить книгу — должно появиться предложение войти.
+
+### Ограничения до Stage 19
+
+- Favorites уже сохраняются в Supabase, но полноценный recommendation scoring по избранному не реализован.
+- Mock-рекомендации могут содержать старые `b1/b2` id; такие книги не сохраняются в Supabase favorites.
+- User events и аналитика добавления в избранное остаются на будущий этап.
+
 ## Next stages backlog
 
-- Stage 13: Preferences в Supabase.
-- Stage 14: Favorites в Supabase.
 - Stage 15: Cart в Supabase.
 - Stage 16: Orders RPC и транзакционное оформление заказа.
 - Stage 17: AI-analysis lifecycle, jobs, worker/edge function и embeddings.

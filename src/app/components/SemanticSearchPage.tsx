@@ -59,7 +59,7 @@ function scoreBook(book: Book, q: string, qTopics: string[]) {
 export function SemanticSearchPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { toggleFav, favorites, addToCart, aiAvailable, searchQuery, setSearchQuery } = useAppContext();
+  const { toggleFav, favorites, favoritePendingIds, addToCart, aiAvailable, searchQuery, setSearchQuery } = useAppContext();
 
   const query = searchParams.get("q") || searchQuery || "";
   const [draft, setDraft] = useState(query);
@@ -257,6 +257,7 @@ export function SemanticSearchPage() {
                     key={book.id}
                     book={book}
                     isFav={favorites.includes(book.id)}
+                    favoriteDisabled={favoritePendingIds.includes(book.id)}
                     onToggleFav={() => toggleFav(book.id)}
                     onAddToCart={() => addToCart(book.id)}
                     onOpen={() => navigate(`/book/${book.slug || book.id}`)}

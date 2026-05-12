@@ -24,7 +24,7 @@ import type { Book } from "./types";
 export function BookDetailsPage() {
   const { bookId } = useParams<{ bookId: string }>();
   const navigate = useNavigate();
-  const { toggleFav, favorites, addToCart } = useAppContext();
+  const { toggleFav, favorites, favoritePendingIds, addToCart } = useAppContext();
 
   const [book, setBook] = useState<Book | null>(null);
   const [similar, setSimilar] = useState<Book[]>([]);
@@ -184,7 +184,7 @@ export function BookDetailsPage() {
               <ShoppingCart size={16} />
               {unavailable ? "Недоступно" : "Добавить в корзину"}
             </PrimaryButton>
-            <GhostButton onClick={() => toggleFav(book.id)}>
+            <GhostButton onClick={() => toggleFav(book.id)} disabled={favoritePendingIds.includes(book.id)}>
               <Heart size={16} fill={fav ? BRAND.navy : "none"} />
               {fav ? "В избранном" : "В избранное"}
             </GhostButton>
@@ -282,7 +282,7 @@ export function BookDetailsPage() {
                 <ShoppingCart size={16} />
                 {unavailable ? "Недоступно" : "В корзину"}
               </PrimaryButton>
-              <GhostButton full onClick={() => toggleFav(book.id)}>
+              <GhostButton full onClick={() => toggleFav(book.id)} disabled={favoritePendingIds.includes(book.id)}>
                 <Heart size={16} fill={fav ? BRAND.navy : "none"} />
                 {fav ? "В избранном" : "В избранное"}
               </GhostButton>
@@ -314,6 +314,7 @@ export function BookDetailsPage() {
                 <BookCard
                   book={b}
                   isFav={favorites.includes(b.id)}
+                  favoriteDisabled={favoritePendingIds.includes(b.id)}
                   onToggleFav={() => toggleFav(b.id)}
                   onAddToCart={() => addToCart(b.id)}
                   onOpen={() => navigate(`/book/${b.slug || b.id}`)}

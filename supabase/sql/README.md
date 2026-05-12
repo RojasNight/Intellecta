@@ -43,6 +43,7 @@
 ### Stage 13: профиль предпочтений пользователя
 
 18. `16_user_preferences_rls.sql` — сужает RLS для `public.user_preferences` до owner-only доступа: `user_id = auth.uid()` для select/insert/update/delete.
+19. `17_favorites_rls.sql` — сужает RLS для `public.favorites` до owner-only доступа: `user_id = auth.uid()` для select/insert/delete.
 
 ## Важные правила
 
@@ -80,6 +81,28 @@ select count(*) from public.admin_get_books();
 select user_id, genres, topics, goals, complexity_min, complexity_max, excluded_genres, updated_at
 from public.user_preferences
 order by updated_at desc nulls last;
+```
+
+SQL Editor может выполняться без app auth-сессии, поэтому RLS-поведение надежнее проверять из приложения под реальными пользователями.
+
+
+## Stage 14 проверки
+
+После запуска `17_favorites_rls.sql` проверьте через приложение:
+
+1. Авторизованный пользователь может добавить книгу в избранное из `/catalog` или карточки книги.
+2. В `public.favorites` появляется строка с `user_id` текущего пользователя и UUID книги.
+3. После reload и logout/login избранное снова загружается.
+4. Другой пользователь не видит избранное первого пользователя.
+5. Неавторизованный пользователь не может создать запись в `favorites`.
+6. Повторное добавление той же книги не создает дубль из-за `primary key (user_id, book_id)`.
+
+Для ручной SQL-проверки структуры:
+
+```sql
+select user_id, book_id, created_at
+from public.favorites
+order by created_at desc;
 ```
 
 SQL Editor может выполняться без app auth-сессии, поэтому RLS-поведение надежнее проверять из приложения под реальными пользователями.

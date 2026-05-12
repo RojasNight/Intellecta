@@ -125,6 +125,7 @@ export function ComplexityScale({ level }: { level: Complexity }) {
 interface BookCardProps {
   book: Book;
   isFav: boolean;
+  favoriteDisabled?: boolean;
   onToggleFav: () => void;
   onAddToCart: () => void;
   onOpen: () => void;
@@ -136,7 +137,7 @@ interface BookCardProps {
 }
 
 export function BookCard({
-  book, isFav, onToggleFav, onAddToCart, onOpen,
+  book, isFav, favoriteDisabled = false, onToggleFav, onAddToCart, onOpen,
   variant = "grid", reasons, score, matched, semanticHint,
 }: BookCardProps) {
   const unavailable = !book.isActive || book.inStock <= 0;
@@ -193,6 +194,7 @@ export function BookCard({
             <CardActions
               isFav={isFav}
               onToggleFav={onToggleFav}
+              favoriteDisabled={favoriteDisabled}
               onAddToCart={onAddToCart}
               onOpen={onOpen}
               unavailable={unavailable}
@@ -232,13 +234,16 @@ export function BookCard({
           <span className="absolute bottom-2 left-2"><ScoreBadge score={score} /></span>
         )}
         <button
-          onClick={(e) => { e.stopPropagation(); onToggleFav(); }}
+          onClick={(e) => { e.stopPropagation(); if (!favoriteDisabled) onToggleFav(); }}
+          disabled={favoriteDisabled}
           aria-pressed={isFav}
           aria-label={isFav ? "Убрать из избранного" : "Добавить в избранное"}
           className="absolute top-2 right-2 rounded-full p-2"
           style={{
             background: "white",
             color: isFav ? BRAND.navy : BRAND.slate,
+            cursor: favoriteDisabled ? "not-allowed" : "pointer",
+            opacity: favoriteDisabled ? 0.7 : 1,
             boxShadow: "0 2px 6px rgba(26,43,60,0.10)",
           }}
         >
@@ -304,9 +309,9 @@ export function BookCard({
 }
 
 function CardActions({
-  isFav, onToggleFav, onAddToCart, onOpen, unavailable,
+  isFav, favoriteDisabled, onToggleFav, onAddToCart, onOpen, unavailable,
 }: {
-  isFav: boolean; onToggleFav: () => void; onAddToCart: () => void; onOpen: () => void; unavailable: boolean;
+  isFav: boolean; favoriteDisabled?: boolean; onToggleFav: () => void; onAddToCart: () => void; onOpen: () => void; unavailable: boolean;
 }) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -319,6 +324,7 @@ function CardActions({
       </button>
       <button
         onClick={onToggleFav}
+        disabled={favoriteDisabled}
         aria-pressed={isFav}
         aria-label={isFav ? "Убрать из избранного" : "Добавить в избранное"}
         className="p-2 rounded-md border"
@@ -326,6 +332,8 @@ function CardActions({
           borderColor: isFav ? BRAND.navy : BRAND.lightGray,
           background: isFav ? BRAND.navy : "white",
           color: isFav ? "white" : BRAND.slate,
+          cursor: favoriteDisabled ? "not-allowed" : "pointer",
+          opacity: favoriteDisabled ? 0.7 : 1,
         }}
       >
         <Heart size={16} fill={isFav ? "white" : "none"} />

@@ -12,7 +12,7 @@ const COMPLEXITIES: Complexity[] = ["Лёгкий", "Средний", "Слож�
 
 export function RecommendationsPage() {
   const navigate = useNavigate();
-  const { preferences, toggleFav, favorites, addToCart, aiAvailable } = useAppContext();
+  const { preferences, toggleFav, favorites, favoritePendingIds, addToCart, aiAvailable } = useAppContext();
   const hasPrefs = !!preferences && (preferences.genres.length > 0 || preferences.topics.length > 0);
 
   const [quickTopics, setQuickTopics] = useState<string[]>([]);
@@ -211,7 +211,7 @@ export function RecommendationsPage() {
                     <PrimaryButton onClick={() => addToCart(book.id)}>
                       <ShoppingCart size={14} /> В корзину
                     </PrimaryButton>
-                    <GhostButton onClick={() => toggleFav(book.id)}>
+                    <GhostButton onClick={() => toggleFav(book.id)} disabled={favoritePendingIds.includes(book.id)}>
                       <Heart size={14} fill={favorites.includes(book.id) ? BRAND.navy : "none"} />
                       {favorites.includes(book.id) ? "В избранном" : "В избранное"}
                     </GhostButton>
@@ -234,6 +234,7 @@ export function RecommendationsPage() {
               key={b.id}
               book={b}
               isFav={favorites.includes(b.id)}
+              favoriteDisabled={favoritePendingIds.includes(b.id)}
               onToggleFav={() => toggleFav(b.id)}
               onAddToCart={() => addToCart(b.id)}
               onOpen={() => navigate(`/book/${b.id}`)}

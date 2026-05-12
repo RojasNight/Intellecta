@@ -1,76 +1,137 @@
 import { CheckCircle2, Heart, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { BRAND } from "./brand";
 import { BOOKS } from "./data";
 import { getCachedBookById } from "../../services/catalogService";
+import { getFavoriteBooks } from "../../services/favoritesService";
 import { useAppContext } from "./Root";
-import type { Order } from "./types";
+import type { FavoriteBook, Order } from "./types";
 import { EmptyState, GhostButton, Notice, PrimaryButton, SectionTitle, SemanticBadge, StatusBadge } from "./shared";
 
 /* ---------- FAVORITES ---------- */
 
 export function FavoritesPage() {
   const navigate = useNavigate();
-  const { favorites, toggleFav, addToCart } = useAppContext();
-  const list = favorites.map((id) => getCachedBookById(id) ?? BOOKS.find((b) => b.id === id)).filter(Boolean) as typeof BOOKS;
+  const { favorites, favoriteLoading, favoriteError, favoritePendingIds, toggleFav, addToCart } = useAppContext();
+  const [list, setList] = useState<FavoriteBook[]>([]);
+  const [loadingBooks, setLoadingBooks] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFavoriteBooks() {
+      if (favorites.length === 0) {
+        setList([]);
+        setLoadError(null);
+        return;
+      }
+
+      setLoadingBooks(true);
+      setLoadError(null);
+      try {
+        const books = await getFavoriteBooks(favorites);
+        if (!cancelled) setList(books);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Не удалось загрузить избранное";
+        if (!cancelled) {
+          setList([]);
+          setLoadError(message);
+        }
+        if (import.meta.env.DEV) {
+          console.error("[Интеллекта][favorites-page] load:error", { message });
+        }
+      } finally {
+        if (!cancelled) setLoadingBooks(false);
+      }
+    }
+
+    void loadFavoriteBooks();
+    return () => { cancelled = true; };
+  }, [favorites]);
+
+  const loading = favoriteLoading || loadingBooks;
+  const error = favoriteError || loadError;
+
   return (
     <main className="max-w-[1100px] mx-auto px-4 md:px-8 py-8 md:py-10 fade-in">
       <SectionTitle sub="Книги, к которым вы хотите вернуться позже">Избранное</SectionTitle>
-      {list.length === 0 ? (
+
+      {error && (
+        <div className="mb-5">
+          <Notice tone="err" title="Не удалось обновить избранное">
+            {error}
+          </Notice>
+        </div>
+      )}
+
+      {loading ? (
+        <Notice tone="info">Загружаем избранные книги…</Notice>
+      ) : list.length === 0 ? (
         <EmptyState
           icon={<Heart size={22} />}
           title="В избранном пока нет книг"
-          text="Добавляйте книги, чтобы возвращаться к ним позже."
+          text="Добавляйте книги, чтобы возвращаться к ним позже. Скрытые или недоступные книги в этом списке не отображаются."
           action={<PrimaryButton onClick={() => navigate("/catalog")}>Перейти в каталог</PrimaryButton>}
         />
       ) : (
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-          {list.map((b) => (
-            <div
-              key={b.id}
-              className="rounded-xl border p-4 flex gap-4 book-card"
-              style={{ background: "white", borderColor: BRAND.beige }}
-            >
-              <button
-                onClick={() => navigate(`/book/${b.id}`)}
-                className="shrink-0 rounded-md overflow-hidden"
-                style={{ width: 80, height: 110, background: BRAND.beige }}
-                aria-label={`Открыть «${b.title}»`}
+          {list.map((b) => {
+            const pending = favoritePendingIds.includes(b.id);
+            return (
+              <div
+                key={b.id}
+                className="rounded-xl border p-4 flex gap-4 book-card"
+                style={{ background: "white", borderColor: BRAND.beige }}
               >
-                <ImageWithFallback src={b.coverUrl} alt={`Обложка книги «${b.title}»`} className="w-full h-full object-cover" />
-              </button>
-              <div className="flex-1 min-w-0">
-                <div className="font-serif" style={{ color: BRAND.navy, fontSize: 16, lineHeight: 1.3 }}>{b.title}</div>
-                <div style={{ color: BRAND.slate, fontSize: 13 }}>{b.authors.join(", ")}</div>
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {b.topics.slice(0, 2).map((t) => <SemanticBadge key={t}>{t}</SemanticBadge>)}
-                </div>
-                <div className="flex items-center justify-between mt-3 gap-2 flex-wrap">
-                  <span style={{ color: BRAND.charcoal }}>{b.price} ₽</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => toggleFav(b.id)}
-                      className="p-2 rounded-full border"
-                      style={{ borderColor: BRAND.lightGray, color: BRAND.navy, background: "white" }}
-                      aria-label="Убрать из избранного"
-                    >
-                      <Heart size={14} fill={BRAND.navy} stroke={BRAND.navy} />
-                    </button>
-                    <button
-                      onClick={() => addToCart(b.id)}
-                      className="rounded-md px-3 py-2 inline-flex items-center gap-2"
-                      style={{ background: BRAND.navy, color: "white", fontSize: 13 }}
-                    >
-                      <ShoppingBag size={14} /> В корзину
-                    </button>
+                <button
+                  onClick={() => navigate(`/book/${b.slug || b.id}`)}
+                  className="shrink-0 rounded-md overflow-hidden"
+                  style={{ width: 80, height: 110, background: BRAND.beige }}
+                  aria-label={`Открыть «${b.title}»`}
+                >
+                  <ImageWithFallback src={b.coverUrl} alt={`Обложка книги «${b.title}»`} className="w-full h-full object-cover" />
+                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="font-serif" style={{ color: BRAND.navy, fontSize: 16, lineHeight: 1.3 }}>{b.title}</div>
+                  <div style={{ color: BRAND.slate, fontSize: 13 }}>{b.authors.join(", ")}</div>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {b.topics.slice(0, 2).map((t) => <SemanticBadge key={t}>{t}</SemanticBadge>)}
+                  </div>
+                  <div className="flex items-center justify-between mt-3 gap-2 flex-wrap">
+                    <span style={{ color: BRAND.charcoal }}>{b.price} ₽</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => toggleFav(b.id)}
+                        disabled={pending}
+                        className="p-2 rounded-full border"
+                        style={{
+                          borderColor: BRAND.lightGray,
+                          color: BRAND.navy,
+                          background: "white",
+                          cursor: pending ? "not-allowed" : "pointer",
+                          opacity: pending ? 0.7 : 1,
+                        }}
+                        aria-label="Убрать из избранного"
+                      >
+                        <Heart size={14} fill={BRAND.navy} stroke={BRAND.navy} />
+                      </button>
+                      <button
+                        onClick={() => addToCart(b.id)}
+                        className="rounded-md px-3 py-2 inline-flex items-center gap-2"
+                        style={{ background: BRAND.navy, color: "white", fontSize: 13 }}
+                      >
+                        <ShoppingBag size={14} /> В корзину
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </main>

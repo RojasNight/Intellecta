@@ -20,7 +20,7 @@ export type CatalogQuery = {
 type CatalogAuthorRow = { id?: string; full_name?: string };
 type CatalogGenreRow = { id?: string; name?: string; slug?: string };
 
-type CatalogViewRow = {
+export type CatalogViewRow = {
   id: string;
   title: string;
   slug: string;
@@ -315,5 +315,5 @@ export function getCachedBooks(): Book[] {
   return books.length ? books : BOOKS;
 }
 
-// Legacy mock data is intentionally kept only for local cart/favorites compatibility
-// until later stages migrate cart and favorites to Supabase.
+// Legacy mock data is intentionally kept only for local cart and recommendation mock compatibility.
+// Favorites use Supabase from Stage 14 onward.

@@ -12,7 +12,7 @@ const FORMATS = ["Печатная", "Электронная", "Аудио"] as 
 
 export function CatalogPage() {
   const navigate = useNavigate();
-  const { toggleFav, favorites, addToCart, setSearchQuery } = useAppContext();
+  const { toggleFav, favorites, favoritePendingIds, addToCart, setSearchQuery } = useAppContext();
   const [q, setQ] = useState("");
   const [genre, setGenre] = useState<string[]>([]);
   const [topics, setTopics] = useState<string[]>([]);
@@ -275,6 +275,7 @@ export function CatalogPage() {
                 <BookCard
                   key={b.id} book={b}
                   isFav={favorites.includes(b.id)}
+                  favoriteDisabled={favoritePendingIds.includes(b.id)}
                   onToggleFav={() => toggleFav(b.id)}
                   onAddToCart={() => addToCart(b.id)}
                   onOpen={() => navigate(`/book/${b.slug || b.id}`)}
@@ -287,6 +288,7 @@ export function CatalogPage() {
                 <BookCard
                   key={b.id} book={b} variant="list"
                   isFav={favorites.includes(b.id)}
+                  favoriteDisabled={favoritePendingIds.includes(b.id)}
                   onToggleFav={() => toggleFav(b.id)}
                   onAddToCart={() => addToCart(b.id)}
                   onOpen={() => navigate(`/book/${b.slug || b.id}`)}
