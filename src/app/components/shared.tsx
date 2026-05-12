@@ -126,6 +126,7 @@ interface BookCardProps {
   book: Book;
   isFav: boolean;
   favoriteDisabled?: boolean;
+  cartDisabled?: boolean;
   onToggleFav: () => void;
   onAddToCart: () => void;
   onOpen: () => void;
@@ -137,7 +138,7 @@ interface BookCardProps {
 }
 
 export function BookCard({
-  book, isFav, favoriteDisabled = false, onToggleFav, onAddToCart, onOpen,
+  book, isFav, favoriteDisabled = false, cartDisabled = false, onToggleFav, onAddToCart, onOpen,
   variant = "grid", reasons, score, matched, semanticHint,
 }: BookCardProps) {
   const unavailable = !book.isActive || book.inStock <= 0;
@@ -198,6 +199,7 @@ export function BookCard({
               onAddToCart={onAddToCart}
               onOpen={onOpen}
               unavailable={unavailable}
+              cartDisabled={cartDisabled}
             />
           </div>
           {reasons && reasons.length > 0 && (
@@ -279,13 +281,13 @@ export function BookCard({
           </div>
           <button
             onClick={onAddToCart}
-            disabled={unavailable}
+            disabled={unavailable || cartDisabled}
             aria-label="Добавить в корзину"
             className="rounded-md px-3 py-2 inline-flex items-center gap-2 shrink-0"
             style={{
-              background: unavailable ? BRAND.lightGray : BRAND.navy,
+              background: unavailable || cartDisabled ? BRAND.lightGray : BRAND.navy,
               color: "white",
-              cursor: unavailable ? "not-allowed" : "pointer",
+              cursor: unavailable || cartDisabled ? "not-allowed" : "pointer",
               fontSize: 13,
             }}
           >
@@ -309,9 +311,9 @@ export function BookCard({
 }
 
 function CardActions({
-  isFav, favoriteDisabled, onToggleFav, onAddToCart, onOpen, unavailable,
+  isFav, favoriteDisabled, cartDisabled, onToggleFav, onAddToCart, onOpen, unavailable,
 }: {
-  isFav: boolean; favoriteDisabled?: boolean; onToggleFav: () => void; onAddToCart: () => void; onOpen: () => void; unavailable: boolean;
+  isFav: boolean; favoriteDisabled?: boolean; cartDisabled?: boolean; onToggleFav: () => void; onAddToCart: () => void; onOpen: () => void; unavailable: boolean;
 }) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -340,12 +342,12 @@ function CardActions({
       </button>
       <button
         onClick={onAddToCart}
-        disabled={unavailable}
+        disabled={unavailable || cartDisabled}
         className="px-3 py-2 rounded-md inline-flex items-center gap-2"
         style={{
-          background: unavailable ? BRAND.lightGray : BRAND.navy,
+          background: unavailable || cartDisabled ? BRAND.lightGray : BRAND.navy,
           color: "white",
-          cursor: unavailable ? "not-allowed" : "pointer",
+          cursor: unavailable || cartDisabled ? "not-allowed" : "pointer",
           fontSize: 14,
         }}
       >

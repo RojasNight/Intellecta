@@ -53,9 +53,51 @@ export interface RemoveFavoriteInput {
   bookId: string;
 }
 
+export interface CartItemRow {
+  id: string;
+  user_id: string;
+  book_id: string;
+  quantity: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CartBook extends Book {
+  stockQty?: number;
+}
+
 export interface CartItem {
+  id: string;
   bookId: string;
+  quantity: number;
+  /** Legacy alias kept while UI components migrate from local cart state. */
   qty: number;
+  book: CartBook;
+  unitPrice: number;
+  lineTotal: number;
+  isAvailable: boolean;
+  availabilityMessage?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CartState {
+  items: CartItem[];
+  count: number;
+  total: number;
+  loading: boolean;
+  error: string | null;
+}
+
+export interface AddToCartInput {
+  bookId: string;
+  quantity?: number;
+}
+
+export interface UpdateCartQuantityInput {
+  itemId?: string;
+  bookId?: string;
+  quantity: number;
 }
 
 export interface RecommendationItem {

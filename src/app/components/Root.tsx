@@ -5,8 +5,14 @@ import { Header } from "./Header";
 import { useAuth } from "../auth/AuthContext";
 import { Footer } from "./Footer";
 import { DEMO_ORDERS } from "./data";
-import { getCachedBookById } from "../../services/catalogService";
 import { addFavorite, getFavoriteBookIds, removeFavorite } from "../../services/favoritesService";
+import {
+  addToCart as addCartItem,
+  clearCart as clearSupabaseCart,
+  getCartItems,
+  removeCartBook,
+  updateCartBookQuantity,
+} from "../../services/cartService";
 import type { CartItem, Order, Preferences, User } from "./types";
 
 interface AppContextValue {
@@ -18,10 +24,14 @@ interface AppContextValue {
   reloadFavorites: () => Promise<void>;
   toggleFav: (id: string) => Promise<void>;
   cart: CartItem[];
-  addToCart: (id: string) => void;
-  setQty: (id: string, qty: number) => void;
-  removeItem: (id: string) => void;
-  clearCart: () => void;
+  cartLoading: boolean;
+  cartError: string | null;
+  cartPendingBookIds: string[];
+  reloadCart: () => Promise<void>;
+  addToCart: (id: string, quantity?: number) => Promise<void>;
+  setQty: (id: string, qty: number) => Promise<void>;
+  removeItem: (id: string) => Promise<void>;
+  clearCart: () => Promise<void>;
   preferences: Preferences | null;
   setPreferences: (p: Preferences | null) => void;
   orders: Order[];
@@ -47,6 +57,9 @@ export function Root() {
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const [favoritePendingIds, setFavoritePendingIds] = useState<string[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [cartLoading, setCartLoading] = useState(false);
+  const [cartError, setCartError] = useState<string | null>(null);
+  const [cartPendingBookIds, setCartPendingBookIds] = useState<string[]>([]);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [orders, setOrders] = useState<Order[]>(DEMO_ORDERS);
   const [aiAvailable] = useState(true);
@@ -69,6 +82,9 @@ export function Root() {
     setFavorites([]);
     setFavoriteError(null);
     setFavoritePendingIds([]);
+    setCart([]);
+    setCartError(null);
+    setCartPendingBookIds([]);
   }, [profile?.id]);
 
   const reloadFavorites = async () => {
@@ -95,10 +111,35 @@ export function Root() {
     }
   };
 
+  const reloadCart = async () => {
+    if (!isAuthenticated || !profile?.id) {
+      setCart([]);
+      setCartError(null);
+      setCartLoading(false);
+      return;
+    }
+
+    setCartLoading(true);
+    setCartError(null);
+    try {
+      const items = await getCartItems();
+      setCart(items);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Не удалось загрузить корзину";
+      setCart([]);
+      setCartError(message);
+      if (import.meta.env.DEV) {
+        console.error("[Интеллекта][cart] load:error", { message });
+      }
+    } finally {
+      setCartLoading(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
+    async function loadFavorites() {
       if (!isAuthenticated || !profile?.id) {
         if (!cancelled) {
           setFavorites([]);
@@ -127,7 +168,43 @@ export function Root() {
       }
     }
 
-    void load();
+    void loadFavorites();
+    return () => { cancelled = true; };
+  }, [isAuthenticated, profile?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCart() {
+      if (!isAuthenticated || !profile?.id) {
+        if (!cancelled) {
+          setCart([]);
+          setCartError(null);
+          setCartLoading(false);
+        }
+        return;
+      }
+
+      setCartLoading(true);
+      setCartError(null);
+      try {
+        const items = await getCartItems();
+        if (!cancelled) setCart(items);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Не удалось загрузить корзину";
+        if (!cancelled) {
+          setCart([]);
+          setCartError(message);
+        }
+        if (import.meta.env.DEV) {
+          console.error("[Интеллекта][cart] auth-load:error", { message });
+        }
+      } finally {
+        if (!cancelled) setCartLoading(false);
+      }
+    }
+
+    void loadCart();
     return () => { cancelled = true; };
   }, [isAuthenticated, profile?.id]);
 
@@ -168,29 +245,118 @@ export function Root() {
     }
   };
 
-  const addToCart = (id: string) => {
-    const b = getCachedBookById(id);
-    if (b && (!b.isActive || b.inStock <= 0)) {
-      toast.error("Книга временно недоступна");
+  const addToCart = async (id: string, quantity = 1) => {
+    if (!isAuthenticated || !profile?.id) {
+      toast.error("Войдите, чтобы добавить книгу в корзину");
+      navigate("/login", { state: { from: location } });
       return;
     }
-    setCart((s) => {
-      const ex = s.find((x) => x.bookId === id);
-      if (ex) return s.map((x) => x.bookId === id ? { ...x, qty: x.qty + 1 } : x);
-      return [...s, { bookId: id, qty: 1 }];
-    });
-    toast.success("Добавлено в корзину");
+
+    if (!UUID_RE.test(id)) {
+      toast.error("Корзина доступна только для книг из каталога Supabase");
+      return;
+    }
+
+    if (cartPendingBookIds.includes(id)) return;
+
+    setCartPendingBookIds((ids) => [...ids, id]);
+    setCartError(null);
+
+    try {
+      await addCartItem(id, quantity);
+      await reloadCart();
+      toast.success("Книга добавлена в корзину");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Не удалось обновить корзину";
+      setCartError(message);
+      toast.error(message);
+    } finally {
+      setCartPendingBookIds((ids) => ids.filter((value) => value !== id));
+    }
   };
 
-  const setQty = (id: string, qty: number) =>
-    setCart((s) => s.map((x) => x.bookId === id ? { ...x, qty } : x));
+  const setQty = async (id: string, qty: number) => {
+    if (!isAuthenticated || !profile?.id) {
+      toast.error("Войдите, чтобы изменить корзину");
+      navigate("/login", { state: { from: location } });
+      return;
+    }
 
-  const removeItem = (id: string) =>
-    setCart((s) => s.filter((x) => x.bookId !== id));
+    const current = cart.find((item) => item.bookId === id);
+    if (!current) return;
 
-  const clearCart = () => setCart([]);
+    const nextQty = Math.max(1, Math.trunc(qty));
+    const previousCart = cart;
+    setCart((items) => items.map((item) => item.bookId === id
+      ? { ...item, quantity: nextQty, qty: nextQty, lineTotal: item.unitPrice * nextQty }
+      : item));
+    setCartPendingBookIds((ids) => [...ids, id]);
+    setCartError(null);
 
-  const cartCount = cart.reduce((n, x) => n + x.qty, 0);
+    try {
+      await updateCartBookQuantity(id, nextQty);
+      await reloadCart();
+      toast.success("Количество обновлено");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Не удалось обновить количество";
+      setCart(previousCart);
+      setCartError(message);
+      toast.error(message);
+    } finally {
+      setCartPendingBookIds((ids) => ids.filter((value) => value !== id));
+    }
+  };
+
+  const removeItem = async (id: string) => {
+    if (!isAuthenticated || !profile?.id) {
+      toast.error("Войдите, чтобы изменить корзину");
+      navigate("/login", { state: { from: location } });
+      return;
+    }
+
+    const previousCart = cart;
+    setCart((items) => items.filter((item) => item.bookId !== id));
+    setCartPendingBookIds((ids) => [...ids, id]);
+    setCartError(null);
+
+    try {
+      await removeCartBook(id);
+      toast.success("Книга удалена из корзины");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Не удалось удалить книгу из корзины";
+      setCart(previousCart);
+      setCartError(message);
+      toast.error(message);
+    } finally {
+      setCartPendingBookIds((ids) => ids.filter((value) => value !== id));
+    }
+  };
+
+  const clearCart = async () => {
+    if (!isAuthenticated || !profile?.id) {
+      setCart([]);
+      return;
+    }
+
+    const previousCart = cart;
+    setCart([]);
+    setCartError(null);
+    setCartPendingBookIds(previousCart.map((item) => item.bookId));
+
+    try {
+      await clearSupabaseCart();
+      toast.success("Корзина очищена");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Не удалось очистить корзину";
+      setCart(previousCart);
+      setCartError(message);
+      toast.error(message);
+    } finally {
+      setCartPendingBookIds([]);
+    }
+  };
+
+  const cartCount = cart.reduce((n, item) => n + item.quantity, 0);
 
   const contextValue: AppContextValue = {
     user,
@@ -201,6 +367,10 @@ export function Root() {
     reloadFavorites,
     toggleFav,
     cart,
+    cartLoading,
+    cartError,
+    cartPendingBookIds,
+    reloadCart,
     addToCart,
     setQty,
     removeItem,
@@ -229,6 +399,9 @@ export function Root() {
               setFavorites([]);
               setFavoriteError(null);
               setFavoritePendingIds([]);
+              setCart([]);
+              setCartError(null);
+              setCartPendingBookIds([]);
               navigate("/");
               toast.success("Вы вышли из аккаунта");
             } catch {

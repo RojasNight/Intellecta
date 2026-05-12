@@ -24,7 +24,7 @@ import type { Book } from "./types";
 export function BookDetailsPage() {
   const { bookId } = useParams<{ bookId: string }>();
   const navigate = useNavigate();
-  const { toggleFav, favorites, favoritePendingIds, addToCart } = useAppContext();
+  const { toggleFav, favorites, favoritePendingIds, cartPendingBookIds, addToCart } = useAppContext();
 
   const [book, setBook] = useState<Book | null>(null);
   const [similar, setSimilar] = useState<Book[]>([]);
@@ -180,7 +180,7 @@ export function BookDetailsPage() {
 
           {/* Inline actions for mobile/tablet (sticky aside hides on small) */}
           <div className="lg:hidden flex items-center gap-3 mt-6 flex-wrap">
-            <PrimaryButton onClick={() => addToCart(book.id)} disabled={unavailable}>
+            <PrimaryButton onClick={() => addToCart(book.id)} disabled={unavailable || cartPendingBookIds.includes(book.id)}>
               <ShoppingCart size={16} />
               {unavailable ? "Недоступно" : "Добавить в корзину"}
             </PrimaryButton>
@@ -278,7 +278,7 @@ export function BookDetailsPage() {
             <div style={{ color: BRAND.charcoal, fontSize: 26 }}>{book.price} ₽</div>
             <div className="mt-2"><AvailabilityBadge inStock={book.inStock} isActive={book.isActive} /></div>
             <div className="mt-4 space-y-2">
-              <PrimaryButton full onClick={() => addToCart(book.id)} disabled={unavailable}>
+              <PrimaryButton full onClick={() => addToCart(book.id)} disabled={unavailable || cartPendingBookIds.includes(book.id)}>
                 <ShoppingCart size={16} />
                 {unavailable ? "Недоступно" : "В корзину"}
               </PrimaryButton>
@@ -315,6 +315,7 @@ export function BookDetailsPage() {
                   book={b}
                   isFav={favorites.includes(b.id)}
                   favoriteDisabled={favoritePendingIds.includes(b.id)}
+                  cartDisabled={cartPendingBookIds.includes(b.id)}
                   onToggleFav={() => toggleFav(b.id)}
                   onAddToCart={() => addToCart(b.id)}
                   onOpen={() => navigate(`/book/${b.slug || b.id}`)}

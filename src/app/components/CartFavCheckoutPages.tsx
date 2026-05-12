@@ -1,11 +1,8 @@
-import { CheckCircle2, Heart, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Heart, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { toast } from "sonner";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { BRAND } from "./brand";
-import { BOOKS } from "./data";
-import { getCachedBookById } from "../../services/catalogService";
 import { getFavoriteBooks } from "../../services/favoritesService";
 import { useAppContext } from "./Root";
 import type { FavoriteBook, Order } from "./types";
@@ -15,7 +12,7 @@ import { EmptyState, GhostButton, Notice, PrimaryButton, SectionTitle, SemanticB
 
 export function FavoritesPage() {
   const navigate = useNavigate();
-  const { favorites, favoriteLoading, favoriteError, favoritePendingIds, toggleFav, addToCart } = useAppContext();
+  const { favorites, favoriteLoading, favoriteError, favoritePendingIds, cartPendingBookIds, toggleFav, addToCart } = useAppContext();
   const [list, setList] = useState<FavoriteBook[]>([]);
   const [loadingBooks, setLoadingBooks] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -81,6 +78,7 @@ export function FavoritesPage() {
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
           {list.map((b) => {
             const pending = favoritePendingIds.includes(b.id);
+            const cartPending = cartPendingBookIds.includes(b.id);
             return (
               <div
                 key={b.id}
@@ -121,8 +119,9 @@ export function FavoritesPage() {
                       </button>
                       <button
                         onClick={() => addToCart(b.id)}
-                        className="rounded-md px-3 py-2 inline-flex items-center gap-2"
-                        style={{ background: BRAND.navy, color: "white", fontSize: 13 }}
+                        disabled={cartPending || b.inStock <= 0 || !b.isActive}
+                        className="rounded-md px-3 py-2 inline-flex items-center gap-2 disabled:opacity-60"
+                        style={{ background: cartPending || b.inStock <= 0 || !b.isActive ? BRAND.lightGray : BRAND.navy, color: "white", fontSize: 13 }}
                       >
                         <ShoppingBag size={14} /> В корзину
                       </button>
@@ -142,22 +141,55 @@ export function FavoritesPage() {
 
 export function CartPage() {
   const navigate = useNavigate();
-  const { cart, setQty, removeItem, user } = useAppContext();
+  const { cart, cartLoading, cartError, cartPendingBookIds, setQty, removeItem, user, reloadCart } = useAppContext();
   const isAuthed = !!user;
   const [promo, setPromo] = useState("");
-  const items = cart.map((c) => ({ ...c, book: getCachedBookById(c.bookId) ?? BOOKS.find((b) => b.id === c.bookId)! })).filter((x) => x.book);
-  const total = items.reduce((s, it) => s + it.book.price * it.qty, 0);
-  const hasUnavailable = items.some((it) => !it.book.isActive || it.book.inStock <= 0);
 
-  if (items.length === 0) {
+  useEffect(() => {
+    if (isAuthed) void reloadCart();
+  }, [isAuthed]);
+
+  const total = cart.reduce((sum, item) => sum + item.lineTotal, 0);
+  const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const hasUnavailable = cart.some((item) => !item.isAvailable);
+
+  if (!isAuthed) {
     return (
       <main className="max-w-3xl mx-auto px-4 md:px-8 py-10 fade-in">
         <SectionTitle>Корзина</SectionTitle>
         <EmptyState
           icon={<ShoppingBag size={22} />}
-          title="Корзина пуста"
-          text="Добавьте книги из каталога или рекомендаций — мы поможем выбрать осознанно."
-          action={<PrimaryButton onClick={() => navigate("/catalog")}>В каталог</PrimaryButton>}
+          title="Войдите, чтобы пользоваться корзиной"
+          text="Корзина сохраняется в вашем профиле и будет доступна после входа с любого устройства."
+          action={<PrimaryButton onClick={() => navigate("/login")}>Войти</PrimaryButton>}
+        />
+      </main>
+    );
+  }
+
+  if (cartLoading) {
+    return (
+      <main className="max-w-3xl mx-auto px-4 md:px-8 py-10 fade-in">
+        <SectionTitle>Корзина</SectionTitle>
+        <Notice tone="info">Загружаем вашу корзину из Supabase…</Notice>
+      </main>
+    );
+  }
+
+  if (cart.length === 0) {
+    return (
+      <main className="max-w-3xl mx-auto px-4 md:px-8 py-10 fade-in">
+        <SectionTitle>Корзина</SectionTitle>
+        {cartError && (
+          <div className="mb-4">
+            <Notice tone="err" title="Не удалось загрузить корзину">{cartError}</Notice>
+          </div>
+        )}
+        <EmptyState
+          icon={<ShoppingBag size={22} />}
+          title="Корзина пока пуста"
+          text="Добавьте книги из каталога — позиции сохранятся в вашем аккаунте."
+          action={<PrimaryButton onClick={() => navigate("/catalog")}>Перейти в каталог</PrimaryButton>}
         />
       </main>
     );
@@ -165,24 +197,31 @@ export function CartPage() {
 
   return (
     <main className="max-w-[1100px] mx-auto px-4 md:px-8 py-8 md:py-10 fade-in">
-      <SectionTitle>Корзина</SectionTitle>
+      <SectionTitle sub="Позиции сохраняются в Supabase и используют актуальные цены каталога">Корзина</SectionTitle>
+
+      {cartError && (
+        <div className="mb-4">
+          <Notice tone="err" title="Не удалось обновить корзину">{cartError}</Notice>
+        </div>
+      )}
 
       {hasUnavailable && (
         <div className="mb-4">
           <Notice tone="err" title="Часть позиций недоступна">
-            Удалите такие книги из корзины или измените количество, чтобы продолжить оформление.
+            Удалите недоступные книги или уменьшите количество, чтобы продолжить оформление на следующем этапе.
           </Notice>
         </div>
       )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <div className="space-y-3">
-          {items.map((it) => {
-            const b = it.book;
-            const unavailable = !b.isActive || b.inStock <= 0;
+          {cart.map((item) => {
+            const book = item.book;
+            const maxQty = Math.max(1, book.inStock || 1);
+            const pending = cartPendingBookIds.includes(item.bookId);
             return (
               <div
-                key={b.id}
+                key={item.id}
                 className="rounded-xl border p-4 flex flex-col sm:flex-row gap-4"
                 style={{ background: "white", borderColor: BRAND.beige }}
               >
@@ -191,31 +230,46 @@ export function CartPage() {
                     className="shrink-0 rounded-md overflow-hidden"
                     style={{ width: 72, height: 100, background: BRAND.beige }}
                   >
-                    <ImageWithFallback src={b.coverUrl} alt={`Обложка книги «${b.title}»`} className="w-full h-full object-cover" />
+                    <ImageWithFallback src={book.coverUrl} alt={`Обложка книги «${book.title}»`} className="w-full h-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-serif" style={{ color: BRAND.navy, fontSize: 16, lineHeight: 1.3 }}>{b.title}</div>
-                    <div style={{ color: BRAND.slate, fontSize: 13 }}>{b.authors.join(", ")}</div>
+                    <button
+                      onClick={() => book.isActive && navigate(`/book/${book.slug || book.id}`)}
+                      className="font-serif text-left"
+                      style={{ color: BRAND.navy, fontSize: 16, lineHeight: 1.3 }}
+                    >
+                      {book.title}
+                    </button>
+                    <div style={{ color: BRAND.slate, fontSize: 13 }}>{book.authors.join(", ")}</div>
                     <div style={{ color: BRAND.gray, fontSize: 13, marginTop: 4 }}>
-                      {b.price} ₽ × {it.qty}
+                      {item.unitPrice} ₽ × {item.quantity}
                     </div>
-                    {unavailable && (
-                      <div className="mt-2">
-                        <StatusBadge status="Недоступно" tone="err" />
-                      </div>
-                    )}
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <StatusBadge
+                        status={item.isAvailable ? "Доступно" : item.availabilityMessage ?? "Недоступно"}
+                        tone={item.isAvailable ? "ok" : "err"}
+                      />
+                      {book.inStock > 0 && item.quantity > book.inStock && (
+                        <StatusBadge status={`В наличии только ${book.inStock}`} tone="warn" />
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center justify-between sm:flex-col sm:items-end gap-3 shrink-0">
-                  <Stepper qty={it.qty} max={Math.max(1, b.inStock || 1)}
-                    onChange={(n) => setQty(b.id, Math.max(1, Math.min(b.inStock || 1, n)))} />
+                  <Stepper
+                    qty={item.quantity}
+                    max={maxQty}
+                    disabled={pending || !book.isActive || book.inStock <= 0}
+                    onChange={(n) => setQty(item.bookId, Math.max(1, Math.min(maxQty, n)))}
+                  />
                   <div className="flex items-center gap-2">
-                    <span style={{ color: BRAND.charcoal }}>{b.price * it.qty} ₽</span>
+                    <span style={{ color: BRAND.charcoal }}>{item.lineTotal} ₽</span>
                     <button
-                      onClick={() => removeItem(b.id)}
-                      className="p-2 rounded-md"
+                      onClick={() => removeItem(item.bookId)}
+                      disabled={pending}
+                      className="p-2 rounded-md disabled:opacity-50"
                       style={{ color: BRAND.slate }}
-                      aria-label="Удалить из корзины"
+                      aria-label={`Удалить «${book.title}» из корзины`}
                     >
                       <Trash2 size={16} />
                     </button>
@@ -234,10 +288,10 @@ export function CartPage() {
             Итого
           </div>
           <div className="flex items-center justify-between" style={{ color: BRAND.slate, fontSize: 14 }}>
-            <span>Товары ({items.length})</span><span>{total} ₽</span>
+            <span>Товары ({itemCount})</span><span>{total} ₽</span>
           </div>
           <div className="flex items-center justify-between mt-2" style={{ color: BRAND.slate, fontSize: 14 }}>
-            <span>Доставка</span><span>при оформлении</span>
+            <span>Доставка</span><span>на Stage 16</span>
           </div>
           <div className="mt-4">
             <label htmlFor="promo" style={{ color: BRAND.darkSlate, fontSize: 13 }}>Промокод</label>
@@ -254,35 +308,35 @@ export function CartPage() {
             <span>К оплате</span><span style={{ fontSize: 20 }}>{total} ₽</span>
           </div>
           <div className="mt-4">
-            <PrimaryButton full onClick={() => navigate("/checkout")} disabled={hasUnavailable}>
-              Оформить заказ
+            <PrimaryButton full onClick={() => navigate("/checkout")} disabled={hasUnavailable || cart.length === 0}>
+              Продолжить
             </PrimaryButton>
           </div>
-          {!isAuthed && (
-            <div style={{ color: BRAND.slate, fontSize: 12, marginTop: 8, textAlign: "center" }}>
-              Для оформления потребуется войти в аккаунт.
-            </div>
-          )}
+          <div style={{ color: BRAND.slate, fontSize: 12, marginTop: 8, textAlign: "center" }}>
+            Оформление заказа будет подключено на Stage 16 через RPC.
+          </div>
         </aside>
       </div>
     </main>
   );
 }
 
-function Stepper({ qty, onChange, max = 99 }: { qty: number; onChange: (n: number) => void; max?: number }) {
+function Stepper({
+  qty, onChange, max = 99, disabled = false,
+}: { qty: number; onChange: (n: number) => void; max?: number; disabled?: boolean }) {
   return (
     <div
       className="inline-flex items-center rounded-md border"
       style={{ borderColor: BRAND.lightGray, background: "white" }}
       role="group" aria-label="Количество"
     >
-      <button onClick={() => onChange(qty - 1)} disabled={qty <= 1}
-        className="p-2 disabled:opacity-40" aria-label="Уменьшить">
+      <button onClick={() => onChange(qty - 1)} disabled={disabled || qty <= 1}
+        className="p-2 disabled:opacity-40" aria-label="Уменьшить количество">
         <Minus size={14} />
       </button>
       <span className="px-3" style={{ color: BRAND.charcoal, minWidth: 28, textAlign: "center" }}>{qty}</span>
-      <button onClick={() => onChange(qty + 1)} disabled={qty >= max}
-        className="p-2 disabled:opacity-40" aria-label="Увеличить">
+      <button onClick={() => onChange(qty + 1)} disabled={disabled || qty >= max}
+        className="p-2 disabled:opacity-40" aria-label="Увеличить количество">
         <Plus size={14} />
       </button>
     </div>
@@ -293,245 +347,80 @@ function Stepper({ qty, onChange, max = 99 }: { qty: number; onChange: (n: numbe
 
 export function CheckoutPage() {
   const navigate = useNavigate();
-  const { cart, setOrders, user, clearCart } = useAppContext();
-  const prefill = { name: user?.name, email: user?.email };
+  const { cart, cartLoading, cartError, user, reloadCart } = useAppContext();
+  const total = cart.reduce((sum, item) => sum + item.lineTotal, 0);
+  const hasUnavailable = cart.some((item) => !item.isAvailable);
 
-  const items = cart.map((c) => ({ ...c, book: getCachedBookById(c.bookId) ?? BOOKS.find((b) => b.id === c.bookId)! })).filter((x) => x.book);
-  const total = items.reduce((s, it) => s + it.book.price * it.qty, 0);
+  useEffect(() => {
+    if (user) void reloadCart();
+  }, [user?.id]);
 
-  const [name, setName] = useState(prefill?.name ?? "");
-  const [email, setEmail] = useState(prefill?.email ?? "");
-  const [phone, setPhone] = useState("");
-  const [delivery, setDelivery] = useState("Курьер");
-  const [comment, setComment] = useState("");
-  const [errors, setErrors] = useState<{ [k: string]: string }>({});
-  const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
-  const [summaryOpen, setSummaryOpen] = useState(false);
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const errs: { [k: string]: string } = {};
-    if (!name.trim()) errs.name = "Укажите имя";
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.email = "Неверный email";
-    if (phone.replace(/\D/g, "").length < 10) errs.phone = "Укажите телефон";
-    setErrors(errs);
-    if (Object.keys(errs).length) return;
-
-    const order: Order = {
-      id: `ORD-${Math.floor(1000 + Math.random() * 9000)}`,
-      status: "создан",
-      total,
-      contact: { name, email, phone },
-      deliveryType: delivery,
-      items: items.map((it) => ({ bookId: it.book.id, title: it.book.title, qty: it.qty, price: it.book.price })),
-      createdAt: new Date().toISOString().slice(0, 10),
-    };
-    setOrders((prev) => [order, ...prev]);
-    setCreatedOrder(order);
-    clearCart();
-    toast.success("Заказ успешно создан!");
-  };
-
-  if (createdOrder) {
-    return (
-      <main className="max-w-2xl mx-auto px-4 md:px-8 py-10 md:py-14 fade-in">
-        <div
-          className="rounded-2xl border p-8 md:p-10"
-          style={{ background: "white", borderColor: BRAND.beige, boxShadow: "0 8px 24px rgba(26,43,60,0.06)" }}
-        >
-          <div className="flex flex-col items-center text-center">
-            <div
-              className="rounded-full inline-flex items-center justify-center"
-              style={{ width: 64, height: 64, background: "#E5EFE6", color: "#2E5E37" }}
-              aria-hidden
-            >
-              <CheckCircle2 size={32} />
-            </div>
-            <h1 className="font-serif mt-4" style={{ color: BRAND.navy, fontSize: 30 }}>Заказ создан</h1>
-            <p style={{ color: BRAND.slate, marginTop: 8, lineHeight: 1.6 }}>
-              Мы сохранили ваш заказ со статусом «создан» и пришлём подтверждение на указанный email.
-            </p>
-            <div className="mt-3"><StatusBadge status={`Статус: ${createdOrder.status}`} tone="info" /></div>
-          </div>
-
-          <dl
-            className="mt-8 grid gap-3 sm:grid-cols-2 rounded-xl p-5"
-            style={{ background: BRAND.cream, border: `1px solid ${BRAND.beige}` }}
-          >
-            <Row label="Номер заказа">{createdOrder.id}</Row>
-            <Row label="Дата">{createdOrder.createdAt}</Row>
-            <Row label="Способ доставки">{createdOrder.deliveryType}</Row>
-            <Row label="Сумма">{createdOrder.total} ₽</Row>
-          </dl>
-
-          <div className="mt-6">
-            <div style={{ color: BRAND.darkSlate, fontSize: 13, marginBottom: 8 }}>Состав заказа</div>
-            <ul className="rounded-xl border divide-y" style={{ borderColor: BRAND.beige }}>
-              {createdOrder.items.map((it) => (
-                <li key={it.bookId} className="flex justify-between gap-3 px-4 py-3" style={{ borderColor: BRAND.beige }}>
-                  <span style={{ color: BRAND.charcoal }}>{it.title} <span style={{ color: BRAND.slate }}>× {it.qty}</span></span>
-                  <span style={{ color: BRAND.charcoal }}>{it.price * it.qty} ₽</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="mt-7 flex justify-center gap-3 flex-wrap">
-            <PrimaryButton onClick={() => navigate("/orders")}>Перейти к истории заказов</PrimaryButton>
-            <GhostButton onClick={() => navigate("/catalog")}>Продолжить покупки</GhostButton>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  if (items.length === 0) {
+  if (cartLoading) {
     return (
       <main className="max-w-3xl mx-auto px-4 md:px-8 py-10 fade-in">
         <SectionTitle>Оформление заказа</SectionTitle>
-        <EmptyState
-          icon={<ShoppingBag size={22} />}
-          title="Корзина пуста"
-          text="Добавьте книги в корзину перед оформлением заказа."
-          action={<PrimaryButton onClick={() => navigate("/catalog")}>Перейти в каталог</PrimaryButton>}
-        />
+        <Notice tone="info">Загружаем актуальную корзину…</Notice>
       </main>
     );
   }
 
-  const SummaryBlock = (
-    <aside
-      className="rounded-xl border p-5 h-fit"
-      style={{ background: "white", borderColor: BRAND.beige }}
-    >
-      <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18, marginBottom: 12 }}>Ваш заказ</div>
-      <ul className="space-y-2 mb-4" style={{ color: BRAND.charcoal, fontSize: 14 }}>
-        {items.map((it) => (
-          <li key={it.book.id} className="flex justify-between gap-3">
-            <span className="truncate">{it.book.title} <span style={{ color: BRAND.slate }}>× {it.qty}</span></span>
-            <span>{it.book.price * it.qty} ₽</span>
-          </li>
-        ))}
-      </ul>
-      <div className="border-t pt-3" style={{ borderColor: BRAND.beige }}>
-        <div className="flex justify-between" style={{ color: BRAND.charcoal, fontSize: 16 }}>
-          <span>К оплате</span><span>{total} ₽</span>
-        </div>
-      </div>
-      <div className="mt-4">
-        <PrimaryButton full type="submit">Подтвердить заказ</PrimaryButton>
-      </div>
-      <p style={{ color: BRAND.gray, fontSize: 12, marginTop: 8 }}>
-        Демонстрационный прототип, реального списания средств не происходит.
-      </p>
-    </aside>
-  );
-
   return (
-    <main className="max-w-[1100px] mx-auto px-4 md:px-8 py-8 md:py-10 fade-in">
-      <SectionTitle>Оформление заказа</SectionTitle>
+    <main className="max-w-[900px] mx-auto px-4 md:px-8 py-8 md:py-10 fade-in">
+      <SectionTitle sub="Заказ будет создан на следующем этапе через Supabase RPC">Оформление заказа</SectionTitle>
 
-      <form onSubmit={submit} className="grid gap-6 lg:grid-cols-[1fr_320px]" noValidate>
-        <div
-          className="rounded-xl border p-5 md:p-6 space-y-5"
-          style={{ background: "white", borderColor: BRAND.beige }}
-        >
-          <div>
-            <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18, marginBottom: 12 }}>
-              Контактные данные
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <CField label="Имя" id="c-name" error={errors.name}>
-                <input id="c-name" value={name} onChange={(e) => setName(e.target.value)}
-                  autoComplete="name"
-                  className="w-full rounded-md border px-3 py-2.5 outline-none"
-                  style={{ borderColor: errors.name ? "#8C2A2A" : BRAND.lightGray }} />
-              </CField>
-              <CField label="Email" id="c-email" error={errors.email}>
-                <input id="c-email" type="email" autoComplete="email"
-                  value={email} onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-md border px-3 py-2.5 outline-none"
-                  style={{ borderColor: errors.email ? "#8C2A2A" : BRAND.lightGray }} />
-              </CField>
-              <CField label="Телефон" id="c-phone" error={errors.phone}>
-                <input id="c-phone" type="tel" autoComplete="tel"
-                  value={phone} onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+7 ..." className="w-full rounded-md border px-3 py-2.5 outline-none"
-                  style={{ borderColor: errors.phone ? "#8C2A2A" : BRAND.lightGray }} />
-              </CField>
-            </div>
-          </div>
+      {cartError && (
+        <div className="mb-4"><Notice tone="err" title="Не удалось загрузить корзину">{cartError}</Notice></div>
+      )}
 
-          <div>
-            <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18, marginBottom: 12 }}>
-              Способ доставки
-            </div>
-            <div className="space-y-2">
-              {["Курьер", "Самовывоз", "Почта"].map((d) => (
-                <label key={d} className="flex items-center gap-2 cursor-pointer rounded-md p-2"
-                  style={{ color: BRAND.charcoal, background: delivery === d ? BRAND.cream : "transparent", border: `1px solid ${delivery === d ? BRAND.beige : "transparent"}` }}>
-                  <input type="radio" name="delivery" checked={delivery === d}
-                    onChange={() => setDelivery(d)} style={{ accentColor: BRAND.navy }} />
-                  {d}
-                </label>
+      {cart.length === 0 ? (
+        <EmptyState
+          icon={<ShoppingBag size={22} />}
+          title="Корзина пока пуста"
+          text="Добавьте книги перед оформлением заказа."
+          action={<PrimaryButton onClick={() => navigate("/catalog")}>Перейти в каталог</PrimaryButton>}
+        />
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+          <div className="rounded-xl border p-5" style={{ background: "white", borderColor: BRAND.beige }}>
+            <h2 className="font-serif" style={{ color: BRAND.navy, fontSize: 20 }}>Состав корзины</h2>
+            <div className="mt-4 space-y-3">
+              {cart.map((item) => (
+                <div key={item.id} className="flex items-start justify-between gap-4 border-b pb-3" style={{ borderColor: BRAND.beige }}>
+                  <div>
+                    <div style={{ color: BRAND.navy }}>{item.book.title}</div>
+                    <div style={{ color: BRAND.slate, fontSize: 13 }}>{item.quantity} × {item.unitPrice} ₽</div>
+                    {!item.isAvailable && (
+                      <div className="mt-1"><StatusBadge status={item.availabilityMessage ?? "Недоступно"} tone="err" /></div>
+                    )}
+                  </div>
+                  <div style={{ color: BRAND.charcoal }}>{item.lineTotal} ₽</div>
+                </div>
               ))}
             </div>
           </div>
 
-          <div>
-            <label htmlFor="comment" style={{ color: BRAND.darkSlate, fontSize: 14 }}>
-              Комментарий к заказу
-            </label>
-            <textarea id="comment" value={comment} onChange={(e) => setComment(e.target.value)} rows={3}
-              className="w-full rounded-md border px-3 py-2 mt-1 outline-none"
-              style={{ borderColor: BRAND.lightGray }} />
-          </div>
-
-          {/* Mobile summary collapsible */}
-          <div className="lg:hidden">
-            <button
-              type="button"
-              onClick={() => setSummaryOpen((s) => !s)}
-              className="w-full rounded-md border px-4 py-3 flex items-center justify-between"
-              style={{ borderColor: BRAND.lightGray, background: BRAND.cream, color: BRAND.navy }}
-              aria-expanded={summaryOpen}
-            >
-              <span>Сводка заказа</span>
-              <span style={{ color: BRAND.charcoal }}>{total} ₽</span>
-            </button>
-            {summaryOpen && <div className="mt-3">{SummaryBlock}</div>}
-            {!summaryOpen && (
-              <div className="mt-3">
-                <PrimaryButton full type="submit">Подтвердить заказ · {total} ₽</PrimaryButton>
+          <aside className="rounded-xl border p-5 h-fit" style={{ background: "white", borderColor: BRAND.beige }}>
+            <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18 }}>Итого</div>
+            <div className="flex items-center justify-between mt-4" style={{ color: BRAND.charcoal }}>
+              <span>Сумма</span><span style={{ fontSize: 20 }}>{total} ₽</span>
+            </div>
+            {hasUnavailable && (
+              <div className="mt-4">
+                <Notice tone="err">Удалите недоступные позиции перед оформлением.</Notice>
               </div>
             )}
-          </div>
+            <div className="mt-4">
+              <PrimaryButton full disabled>
+                Оформление заказа — Stage 16
+              </PrimaryButton>
+            </div>
+            <div className="mt-3">
+              <GhostButton full onClick={() => navigate("/cart")}>Вернуться в корзину</GhostButton>
+            </div>
+          </aside>
         </div>
-
-        <div className="hidden lg:block">{SummaryBlock}</div>
-      </form>
+      )}
     </main>
-  );
-}
-
-function CField({ label, id, error, children }: { label: string; id: string; error?: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label htmlFor={id} style={{ color: BRAND.darkSlate, fontSize: 14, display: "block", marginBottom: 6 }}>
-        {label}
-      </label>
-      {children}
-      {error && <div role="alert" style={{ color: "#8C2A2A", fontSize: 12, marginTop: 4 }}>{error}</div>}
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <dt style={{ color: BRAND.slate, fontSize: 12, letterSpacing: "0.04em", textTransform: "uppercase" }}>{label}</dt>
-      <dd style={{ color: BRAND.charcoal, marginTop: 2 }}>{children}</dd>
-    </div>
   );
 }
 

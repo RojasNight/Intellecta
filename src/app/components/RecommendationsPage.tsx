@@ -12,7 +12,7 @@ const COMPLEXITIES: Complexity[] = ["Лёгкий", "Средний", "Слож�
 
 export function RecommendationsPage() {
   const navigate = useNavigate();
-  const { preferences, toggleFav, favorites, favoritePendingIds, addToCart, aiAvailable } = useAppContext();
+  const { preferences, toggleFav, favorites, favoritePendingIds, cartPendingBookIds, addToCart, aiAvailable } = useAppContext();
   const hasPrefs = !!preferences && (preferences.genres.length > 0 || preferences.topics.length > 0);
 
   const [quickTopics, setQuickTopics] = useState<string[]>([]);
@@ -208,7 +208,7 @@ export function RecommendationsPage() {
                   </ul>
 
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <PrimaryButton onClick={() => addToCart(book.id)}>
+                    <PrimaryButton onClick={() => addToCart(book.id)} disabled={cartPendingBookIds.includes(book.id)}>
                       <ShoppingCart size={14} /> В корзину
                     </PrimaryButton>
                     <GhostButton onClick={() => toggleFav(book.id)} disabled={favoritePendingIds.includes(book.id)}>
@@ -235,6 +235,7 @@ export function RecommendationsPage() {
               book={b}
               isFav={favorites.includes(b.id)}
               favoriteDisabled={favoritePendingIds.includes(b.id)}
+              cartDisabled={cartPendingBookIds.includes(b.id)}
               onToggleFav={() => toggleFav(b.id)}
               onAddToCart={() => addToCart(b.id)}
               onOpen={() => navigate(`/book/${b.id}`)}

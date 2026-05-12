@@ -315,5 +315,5 @@ export function getCachedBooks(): Book[] {
   return books.length ? books : BOOKS;
 }
 
-// Legacy mock data is intentionally kept only for local cart and recommendation mock compatibility.
-// Favorites use Supabase from Stage 14 onward.
+// Legacy mock data is intentionally kept only for recommendation mock compatibility.
+// Favorites use Supabase from Stage 14 onward; cart uses Supabase from Stage 15 onward.

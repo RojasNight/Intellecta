@@ -17,7 +17,7 @@
 
 ## Current stage/status
 
-Текущий этап: **Stage 14 — избранное пользователя через Supabase**.
+Текущий этап: **Stage 15 — корзина пользователя через Supabase**.
 
 Готово на предыдущих этапах:
 
@@ -54,9 +54,20 @@
 - Добавлен service layer `favoritesService`.
 - Добавлен SQL-скрипт для own-only RLS на `favorites`.
 
-Пока не переносится в рамках Stage 14:
+Готово на Stage 15:
 
-- Cart/Orders на Supabase.
+- Корзина пользователя хранится в `public.cart_items`, а не только в React state.
+- Cart загружается после login, сохраняется после reload/logout/login и очищается при смене аккаунта.
+- Каталог, карточка книги, header-счетчик, страница `/cart` и checkout-summary используют общий Supabase-backed cart state.
+- Количество обновляется в Supabase, одна книга не дублируется в корзине благодаря unique constraint `user_id + book_id`.
+- Total считается по актуальной цене книги, загруженной из `book_catalog_view`.
+- Неактивные/отсутствующие книги отображаются как недоступные, а переход к оформлению блокируется.
+- Добавлен service layer `cartService`.
+- Добавлен SQL-скрипт для own-only RLS на `cart_items`.
+
+Пока не переносится в рамках Stage 15:
+
+- Orders/checkout RPC на Supabase.
 - Полноценные рекомендации из Supabase.
 - User events.
 - Реальный AI-analysis job pipeline.
@@ -232,7 +243,7 @@ RLS:
 7. Войти другим аккаунтом — избранное первого пользователя не должно отображаться.
 8. Выйти и нажать favorite в каталоге — приложение должно предложить войти.
 
-Stage 15 перенесет Cart, Stage 19 будет использовать favorites для рекомендаций из Supabase.
+Stage 15 переносит Cart в Supabase; Stage 19 будет использовать favorites и cart/orders-сигналы для рекомендаций из Supabase.
 
 ## SQL scripts order
 
@@ -260,6 +271,7 @@ SQL-скрипты находятся в `supabase/sql/` и применяютс
 17. `15_admin_book_crud_rpc.sql` — Stage 12 RPC для админского CRUD книг, связей авторов/жанров и pending AI-профиля.
 18. `16_user_preferences_rls.sql` — Stage 13 own-only RLS для `public.user_preferences`.
 19. `17_favorites_rls.sql` — Stage 14 own-only RLS для `public.favorites`.
+20. `18_cart_items_rls.sql` — Stage 15 own-only RLS и integrity baseline для `public.cart_items`.
 
 В папке есть два файла с номером `08_`. На Stage 11 SQL-логику не меняем и файлы не переименовываем, чтобы не ломать существующие ссылки. Порядок выше фиксирует безопасную последовательность запуска.
 
@@ -478,8 +490,48 @@ Stage 14 реализует настоящее избранное в Supabase б
 - Mock-рекомендации могут содержать старые `b1/b2` id; такие книги не сохраняются в Supabase favorites.
 - User events и аналитика добавления в избранное остаются на будущий этап.
 
+## Stage 15 — Cart in Supabase
+
+Stage 15 реализует настоящую пользовательскую корзину в Supabase без service role key во frontend. Source of truth — таблица `public.cart_items`; React state используется только как cache текущей сессии.
+
+### Используемые таблицы и view
+
+- `public.cart_items`
+- `public.books`
+- `public.book_catalog_view` для актуальных цен, наличия, активности и карточек книг
+- `public.profiles` через Supabase Auth session
+
+### SQL для Stage 15
+
+Перед проверкой выполните в Supabase SQL Editor:
+
+```sql
+-- supabase/sql/18_cart_items_rls.sql
+```
+
+Скрипт включает RLS для `cart_items`, проверяет constraints `unique(user_id, book_id)` и `quantity > 0`, удаляет возможные широкие policies и создает owner-only policies для select/insert/update/delete.
+
+### Как проверить корзину
+
+1. Войти обычным пользователем.
+2. Открыть `/catalog` и добавить активную книгу в корзину.
+3. Проверить строку в `public.cart_items` с `user_id` текущего пользователя, UUID книги и `quantity`.
+4. Открыть `/cart`, изменить количество и перезагрузить страницу — quantity должен сохраниться.
+5. Добавить ту же книгу повторно — должна увеличиться `quantity`, а не появиться вторая строка.
+6. Удалить книгу из корзины, перезагрузить страницу и убедиться, что она не вернулась.
+7. Повторить под другим аккаунтом — корзины должны быть разными.
+8. Изменить цену книги в админке, перезагрузить корзину и проверить актуальную цену из Supabase.
+9. Скрыть книгу в админке и проверить, что item помечен как недоступный.
+10. Выйти и попробовать добавить книгу — должно появиться предложение войти.
+
+### Ограничения до Stage 16
+
+- Страница `/checkout` показывает актуальный summary корзины, но не создает заказ.
+- Оформление заказа намеренно заблокировано до RPC-реализации на Stage 16.
+- Корзина уже готова для будущего `create_order_from_cart` RPC: есть `book_id`, `quantity`, актуальная цена читается из БД, есть `clearCart()`.
+
 ## Next stages backlog
 
-- Stage 15: Cart в Supabase.
 - Stage 16: Orders RPC и транзакционное оформление заказа.
-- Stage 17: AI-analysis lifecycle, jobs, worker/edge function и embeddings.
+- Stage 18: User Events.
+- Stage 19: Recommendations на основе preferences, favorites, cart/orders и AI-профилей.
