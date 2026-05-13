@@ -16,8 +16,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { BRAND } from "./brand";
-import { ADMIN_ORDERS } from "./data";
-import type { Order } from "./types";
+import type { OrderStatus, OrderWithItems } from "./types";
 import { Breadcrumbs, EmptyState, GhostButton, Notice, PrimaryButton, SectionTitle, StatusBadge } from "./shared";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { useAuth } from "../auth/AuthContext";
@@ -45,6 +44,7 @@ import {
   validateBookCoverFile,
 } from "../../services/storageService";
 import { SupabaseStatus } from "./SupabaseStatus";
+import { adminGetOrders, adminUpdateOrderStatus } from "../../services/orderService";
 
 type AdminTab = "overview" | "books" | "orders" | "ai" | "logs";
 type BookFormSubmit = { input: CreateBookInput; coverFile: File | null };
@@ -60,6 +60,26 @@ const NAV: { v: AdminTab; label: string; icon: ReactNode }[] = [
   { v: "ai", label: "ИИ-анализ", icon: <Sparkles size={16} /> },
   { v: "logs", label: "Логи", icon: <FileText size={16} /> },
 ];
+
+const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
+  created: "создан",
+  processing: "в обработке",
+  completed: "завершен",
+  cancelled: "отменен",
+};
+
+const ORDER_STATUS_OPTIONS: Array<{ value: OrderStatus; label: string }> = [
+  { value: "created", label: "создан" },
+  { value: "processing", label: "в обработке" },
+  { value: "completed", label: "завершен" },
+  { value: "cancelled", label: "отменен" },
+];
+
+const DELIVERY_LABELS: Record<string, string> = {
+  pickup: "Самовывоз",
+  courier: "Курьер",
+  digital: "Электронная доставка",
+};
 
 const FORMAT_OPTIONS: Array<{ value: BookFormatValue; label: string }> = [
   { value: "paper", label: "Печатная" },
@@ -107,7 +127,7 @@ export function AdminPage() {
   const [books, setBooks] = useState<BookAdminRow[]>([]);
   const [authors, setAuthors] = useState<Author[]>([]);
   const [genres, setGenres] = useState<Genre[]>([]);
-  const [orders, setOrders] = useState<Order[]>(ADMIN_ORDERS);
+  const [orders, setOrders] = useState<OrderWithItems[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { isAdmin } = useAuth();
@@ -117,14 +137,16 @@ export function AdminPage() {
     setError(null);
 
     try {
-      const [nextBooks, nextAuthors, nextGenres] = await Promise.all([
+      const [nextBooks, nextAuthors, nextGenres, nextOrders] = await Promise.all([
         getAdminBooks(),
         getAuthors(),
         getGenres(),
+        adminGetOrders(),
       ]);
       setBooks(nextBooks);
       setAuthors(nextAuthors);
       setGenres(nextGenres);
+      setOrders(nextOrders);
     } catch (err) {
       const message = getErrorMessage(err, "Не удалось загрузить данные админ-панели.");
       setError(message);
@@ -158,7 +180,7 @@ export function AdminPage() {
         Панель администратора
       </h1>
       <p style={{ color: BRAND.slate, marginTop: 4, fontSize: 14 }}>
-        Реальное управление каталогом книг в Supabase. Заказы и ИИ-анализ остаются демонстрационными до следующих этапов.
+        Реальное управление каталогом и заказами в Supabase. ИИ-анализ остается демонстрационным до Stage 17.
       </p>
 
       <div className="md:hidden mt-5 flex gap-2 overflow-x-auto no-scrollbar">
@@ -225,7 +247,7 @@ function NavButton({ item, active, onClick, block = false }: {
 
 function Overview({ books, orders, go, loading, onReload }: {
   books: BookAdminRow[];
-  orders: Order[];
+  orders: OrderWithItems[];
   go: (t: AdminTab) => void;
   loading: boolean;
   onReload: () => Promise<void>;
@@ -837,61 +859,161 @@ function AITab({ books }: { books: BookAdminRow[] }) {
   );
 }
 
-function OrdersTab({ orders, setOrders }: { orders: Order[]; setOrders: (o: Order[]) => void }) {
-  const tone = (s: Order["status"]) =>
-    s === "завершен" ? "ok" : s === "отменен" ? "err" : s === "в обработке" ? "warn" : "info";
+function orderStatusTone(status: OrderStatus): "ok" | "warn" | "err" | "info" {
+  if (status === "completed") return "ok";
+  if (status === "cancelled") return "err";
+  if (status === "processing") return "warn";
+  return "info";
+}
+
+function formatOrderDate(value?: string | null) {
+  if (!value) return "—";
+  try {
+    return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+  } catch {
+    return value.slice(0, 10);
+  }
+}
+
+function shortOrderId(id: string) {
+  return `#${id.slice(0, 8)}`;
+}
+
+function OrdersTab({ orders, setOrders }: { orders: OrderWithItems[]; setOrders: (o: OrderWithItems[]) => void }) {
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const changeStatus = async (orderId: string, status: OrderStatus) => {
+    const previous = orders;
+    setUpdatingId(orderId);
+    setOrders(orders.map((order) => order.id === orderId ? { ...order, status } : order));
+
+    try {
+      const updated = await adminUpdateOrderStatus(orderId, status);
+      setOrders(orders.map((order) => order.id === orderId ? { ...updated, items: order.items } : order));
+      toast.success("Статус заказа обновлен");
+    } catch (err) {
+      const message = getErrorMessage(err, "Не удалось изменить статус заказа.");
+      setOrders(previous);
+      toast.error(message);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
 
   return (
     <div>
-      <SectionTitle sub="Заказы остаются mock/local до Stage 16 Orders RPC.">Заказы</SectionTitle>
-      <div className="hidden md:block rounded-xl border overflow-x-auto" style={{ background: "white", borderColor: BRAND.beige }}>
-        <table className="w-full text-sm" style={{ minWidth: 760 }}>
-          <thead>
-            <tr style={{ color: BRAND.slate, background: BRAND.cream }}>
-              <Th>Заказ</Th><Th>Клиент</Th><Th>Дата</Th><Th>Сумма</Th><Th>Доставка</Th><Th>Статус</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {orders.map((o) => (
-              <tr key={o.id} className="border-t" style={{ borderColor: BRAND.beige }}>
-                <Td><span style={{ color: BRAND.navy }}>{o.id}</span></Td>
-                <Td>{o.contact.name}</Td>
-                <Td>{o.createdAt}</Td>
-                <Td>{o.total} ₽</Td>
-                <Td>{o.deliveryType}</Td>
-                <Td>
-                  <div className="inline-flex items-center gap-2">
-                    <StatusBadge status={o.status} tone={tone(o.status) as "ok" | "warn" | "err" | "info"} />
-                    <select
-                      value={o.status}
-                      onChange={(e) => setOrders(orders.map((x) => x.id === o.id ? { ...x, status: e.target.value as Order["status"] } : x))}
-                      className="rounded-md border px-2 py-1 bg-white"
-                      style={{ borderColor: BRAND.lightGray, fontSize: 12 }}
-                      aria-label={`Изменить статус заказа ${o.id}`}
-                    >
-                      <option>создан</option><option>в обработке</option><option>завершен</option><option>отменен</option>
-                    </select>
-                  </div>
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <SectionTitle sub="Заказы загружаются из Supabase; изменение статуса выполняется через admin RPC.">Заказы</SectionTitle>
+      {orders.length === 0 ? (
+        <EmptyState
+          icon={<ClipboardList size={18} />}
+          title="Заказов пока нет"
+          text="После оформления заказа пользователем записи появятся в public.orders и public.order_items."
+        />
+      ) : (
+        <>
+          <div className="hidden md:block rounded-xl border overflow-x-auto" style={{ background: "white", borderColor: BRAND.beige }}>
+            <table className="w-full text-sm" style={{ minWidth: 860 }}>
+              <thead>
+                <tr style={{ color: BRAND.slate, background: BRAND.cream }}>
+                  <Th>Заказ</Th><Th>Клиент</Th><Th>Дата</Th><Th>Сумма</Th><Th>Получение</Th><Th>Статус</Th><Th></Th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.map((o) => (
+                  <tr key={o.id} className="border-t" style={{ borderColor: BRAND.beige }}>
+                    <Td><span style={{ color: BRAND.navy }}>{shortOrderId(o.id)}</span></Td>
+                    <Td>{o.contact_json.name || o.contact_json.email || o.user_id.slice(0, 8)}</Td>
+                    <Td>{formatOrderDate(o.created_at)}</Td>
+                    <Td>{o.total_amount} ₽</Td>
+                    <Td>{DELIVERY_LABELS[o.delivery_type] ?? o.delivery_type}</Td>
+                    <Td>
+                      <div className="inline-flex items-center gap-2">
+                        <StatusBadge status={ORDER_STATUS_LABELS[o.status]} tone={orderStatusTone(o.status)} />
+                        <select
+                          value={o.status}
+                          disabled={updatingId === o.id}
+                          onChange={(e) => void changeStatus(o.id, e.target.value as OrderStatus)}
+                          className="rounded-md border px-2 py-1 bg-white disabled:opacity-60"
+                          style={{ borderColor: BRAND.lightGray, fontSize: 12 }}
+                          aria-label={`Изменить статус заказа ${o.id}`}
+                        >
+                          {ORDER_STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </Td>
+                    <Td>
+                      <button onClick={() => setExpandedId(expandedId === o.id ? null : o.id)} style={{ color: BRAND.navy }}>
+                        {expandedId === o.id ? "Скрыть" : "Состав"}
+                      </button>
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-      <div className="md:hidden space-y-3">
-        {orders.map((o) => (
-          <div key={o.id} className="rounded-xl border p-4" style={{ background: "white", borderColor: BRAND.beige }}>
-            <div className="flex items-center justify-between">
-              <div style={{ color: BRAND.navy }}>{o.id}</div>
-              <StatusBadge status={o.status} tone={tone(o.status) as "ok" | "warn" | "err" | "info"} />
+          <div className="md:hidden space-y-3">
+            {orders.map((o) => (
+              <div key={o.id} className="rounded-xl border p-4" style={{ background: "white", borderColor: BRAND.beige }}>
+                <div className="flex items-center justify-between gap-2">
+                  <div style={{ color: BRAND.navy }}>{shortOrderId(o.id)}</div>
+                  <StatusBadge status={ORDER_STATUS_LABELS[o.status]} tone={orderStatusTone(o.status)} />
+                </div>
+                <dl className="grid grid-cols-2 gap-2 mt-3" style={{ fontSize: 13 }}>
+                  <CardKV label="Клиент">{o.contact_json.name || o.contact_json.email || "—"}</CardKV>
+                  <CardKV label="Дата">{formatOrderDate(o.created_at)}</CardKV>
+                  <CardKV label="Сумма">{o.total_amount} ₽</CardKV>
+                  <CardKV label="Получение">{DELIVERY_LABELS[o.delivery_type] ?? o.delivery_type}</CardKV>
+                </dl>
+                <div className="mt-3">
+                  <select
+                    value={o.status}
+                    disabled={updatingId === o.id}
+                    onChange={(e) => void changeStatus(o.id, e.target.value as OrderStatus)}
+                    className="w-full rounded-md border px-2 py-2 bg-white disabled:opacity-60"
+                    style={{ borderColor: BRAND.lightGray, fontSize: 13 }}
+                  >
+                    {ORDER_STATUS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <button className="mt-3" onClick={() => setExpandedId(expandedId === o.id ? null : o.id)} style={{ color: BRAND.navy }}>
+                  {expandedId === o.id ? "Скрыть состав" : "Показать состав"}
+                </button>
+                {expandedId === o.id && <AdminOrderItems order={o} />}
+              </div>
+            ))}
+          </div>
+
+          {expandedId && (
+            <div className="hidden md:block mt-4">
+              {orders.filter((order) => order.id === expandedId).map((order) => <AdminOrderItems key={order.id} order={order} />)}
             </div>
-            <dl className="grid grid-cols-2 gap-2 mt-3" style={{ fontSize: 13 }}>
-              <CardKV label="Клиент">{o.contact.name}</CardKV>
-              <CardKV label="Дата">{o.createdAt}</CardKV>
-              <CardKV label="Сумма">{o.total} ₽</CardKV>
-              <CardKV label="Доставка">{o.deliveryType}</CardKV>
-            </dl>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function AdminOrderItems({ order }: { order: OrderWithItems }) {
+  return (
+    <div className="rounded-xl border p-4" style={{ background: BRAND.cream, borderColor: BRAND.beige }}>
+      <div className="grid gap-2 sm:grid-cols-3" style={{ color: BRAND.charcoal, fontSize: 13 }}>
+        <CardKV label="Email">{order.contact_json.email || "—"}</CardKV>
+        <CardKV label="Телефон">{order.contact_json.phone || "—"}</CardKV>
+        <CardKV label="Адрес">{order.contact_json.address || "—"}</CardKV>
+      </div>
+      {order.comment && <div className="mt-3" style={{ color: BRAND.charcoal, fontSize: 13 }}>{order.comment}</div>}
+      <div className="mt-4 space-y-2">
+        {order.items.map((item) => (
+          <div key={item.id} className="flex justify-between gap-3" style={{ color: BRAND.charcoal, fontSize: 14 }}>
+            <span>{item.title_snapshot} × {item.quantity}</span>
+            <span>{item.price_snapshot * item.quantity} ₽</span>
           </div>
         ))}
       </div>

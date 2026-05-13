@@ -4,7 +4,6 @@ import { Toaster, toast } from "sonner";
 import { Header } from "./Header";
 import { useAuth } from "../auth/AuthContext";
 import { Footer } from "./Footer";
-import { DEMO_ORDERS } from "./data";
 import { addFavorite, getFavoriteBookIds, removeFavorite } from "../../services/favoritesService";
 import {
   addToCart as addCartItem,
@@ -13,7 +12,7 @@ import {
   removeCartBook,
   updateCartBookQuantity,
 } from "../../services/cartService";
-import type { CartItem, Order, Preferences, User } from "./types";
+import type { CartItem, Preferences, User } from "./types";
 
 interface AppContextValue {
   user: User | null;
@@ -34,8 +33,6 @@ interface AppContextValue {
   clearCart: () => Promise<void>;
   preferences: Preferences | null;
   setPreferences: (p: Preferences | null) => void;
-  orders: Order[];
-  setOrders: (orders: Order[] | ((prev: Order[]) => Order[])) => void;
   aiAvailable: boolean;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
@@ -61,7 +58,6 @@ export function Root() {
   const [cartError, setCartError] = useState<string | null>(null);
   const [cartPendingBookIds, setCartPendingBookIds] = useState<string[]>([]);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
-  const [orders, setOrders] = useState<Order[]>(DEMO_ORDERS);
   const [aiAvailable] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -377,8 +373,6 @@ export function Root() {
     clearCart,
     preferences,
     setPreferences,
-    orders,
-    setOrders,
     aiAvailable,
     searchQuery,
     setSearchQuery,

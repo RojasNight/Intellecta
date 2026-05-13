@@ -12,12 +12,13 @@
 - Supabase Auth / PostgreSQL / Storage
 - Vercel для hosting и automatic deployment после push в GitHub
 - npm как основной package manager
+- Node.js >= 20 для совместимости с текущими версиями Supabase JS и React Router
 
 На текущем этапе приложение работает как React/Vite SPA и обращается к Supabase напрямую из браузера через публичный anon key. Service role key во frontend запрещен.
 
 ## Current stage/status
 
-Текущий этап: **Stage 15 — корзина пользователя через Supabase**.
+Текущий этап: **Stage 16 — оформление заказов через Supabase RPC**.
 
 Готово на предыдущих этапах:
 
@@ -65,9 +66,19 @@
 - Добавлен service layer `cartService`.
 - Добавлен SQL-скрипт для own-only RLS на `cart_items`.
 
-Пока не переносится в рамках Stage 15:
+Готово на Stage 16:
 
-- Orders/checkout RPC на Supabase.
+- Оформление заказа выполняется через Supabase RPC `create_order_from_cart`, а не через frontend insert.
+- RPC берет корзину текущего пользователя из `public.cart_items`, проверяет активность книг и остатки, пересчитывает `total_amount` на стороне БД.
+- `public.orders` получает заказ со статусом `created`, способом получения, контактами и комментарием.
+- `public.order_items` получает snapshot названия, цены и количества каждой книги.
+- После успешного заказа корзина пользователя очищается.
+- `/orders` загружает историю заказов из Supabase и показывает только заказы текущего пользователя по RLS.
+- Вкладка `/admin → Заказы` загружает все заказы для admin и меняет статус через RPC `admin_update_order_status`.
+- Прямые INSERT/UPDATE/DELETE для `orders` и `order_items` не выдаются frontend-роли, чтобы пользователь не мог подменить сумму или статус.
+
+Пока не переносится в рамках Stage 16:
+
 - Полноценные рекомендации из Supabase.
 - User events.
 - Реальный AI-analysis job pipeline.
@@ -76,27 +87,28 @@
 ## Local development in VS Code
 
 1. Откройте папку проекта в VS Code.
-2. Создайте `.env.local` на основе `.env.example`.
-3. Установите зависимости:
+2. Используйте Node.js 20+ (`.nvmrc` содержит `20`).
+3. Создайте `.env.local` на основе `.env.example`.
+4. Установите зависимости:
 
 ```bash
 npm install
 ```
 
-4. Запустите dev-сервер:
+5. Запустите dev-сервер:
 
 ```bash
 npm run dev
 ```
 
-5. Откройте локальный URL из терминала Vite.
-6. Перед push проверьте production build:
+6. Откройте локальный URL из терминала Vite.
+7. Перед push проверьте production build:
 
 ```bash
 npm run build
 ```
 
-7. При необходимости проверьте production build локально:
+8. При необходимости проверьте production build локально:
 
 ```bash
 npm run preview
@@ -272,6 +284,7 @@ SQL-скрипты находятся в `supabase/sql/` и применяютс
 18. `16_user_preferences_rls.sql` — Stage 13 own-only RLS для `public.user_preferences`.
 19. `17_favorites_rls.sql` — Stage 14 own-only RLS для `public.favorites`.
 20. `18_cart_items_rls.sql` — Stage 15 own-only RLS и integrity baseline для `public.cart_items`.
+21. `19_orders_rpc_rls.sql` — Stage 16 RLS для заказов, RPC оформления заказа и admin RPC смены статуса.
 
 В папке есть два файла с номером `08_`. На Stage 11 SQL-логику не меняем и файлы не переименовываем, чтобы не ломать существующие ссылки. Порядок выше фиксирует безопасную последовательность запуска.
 
@@ -524,14 +537,63 @@ Stage 15 реализует настоящую пользовательскую 
 9. Скрыть книгу в админке и проверить, что item помечен как недоступный.
 10. Выйти и попробовать добавить книгу — должно появиться предложение войти.
 
-### Ограничения до Stage 16
+### Что изменилось на Stage 16
 
-- Страница `/checkout` показывает актуальный summary корзины, но не создает заказ.
-- Оформление заказа намеренно заблокировано до RPC-реализации на Stage 16.
-- Корзина уже готова для будущего `create_order_from_cart` RPC: есть `book_id`, `quantity`, актуальная цена читается из БД, есть `clearCart()`.
+- Страница `/checkout` больше не заблокирована: она отправляет заказ через RPC `create_order_from_cart`.
+- Корзина остается source of truth до момента оформления. RPC сам читает `cart_items`, проверяет книги и считает итог.
+- После успешного заказа корзина очищается на стороне БД, а frontend перезагружает cart state.
+- История `/orders` загружается из `public.orders` и `public.order_items` по RLS.
+- Админ-панель показывает реальные заказы и обновляет статус через `admin_update_order_status`.
 
 ## Next stages backlog
 
-- Stage 16: Orders RPC и транзакционное оформление заказа.
 - Stage 18: User Events.
 - Stage 19: Recommendations на основе preferences, favorites, cart/orders и AI-профилей.
+
+
+## Stage 16 — Orders RPC
+
+Stage 16 реализует безопасное оформление заказа в Supabase без service role key во frontend. Source of truth для заказа — транзакционная RPC-функция `public.create_order_from_cart(...)`. Frontend передает только способ получения, контактные данные и комментарий; состав корзины, цены и итоговая сумма берутся из БД.
+
+### Используемые таблицы
+
+- `public.cart_items` — текущая корзина пользователя.
+- `public.books` — актуальные цены, активность и `stock_qty`.
+- `public.orders` — заказ пользователя.
+- `public.order_items` — snapshot позиций заказа.
+
+### SQL для Stage 16
+
+Перед проверкой выполните в Supabase SQL Editor:
+
+```sql
+-- supabase/sql/19_orders_rpc_rls.sql
+```
+
+Скрипт добавляет:
+
+- RLS для `public.orders`;
+- RLS для `public.order_items`;
+- RPC `create_order_from_cart(p_delivery_type, p_contact_json, p_comment)`;
+- RPC `admin_update_order_status(p_order_id, p_status)`;
+- grants/revokes, запрещающие прямую запись в orders/order_items из frontend.
+
+### Как проверить оформление заказа
+
+1. Войти обычным пользователем.
+2. Открыть `/catalog` и добавить активную книгу в корзину.
+3. Открыть `/checkout`.
+4. Заполнить имя, email, способ получения и при необходимости телефон/адрес.
+5. Нажать «Оформить заказ».
+6. Проверить, что появился toast «Заказ создан».
+7. Убедиться, что `/orders` показывает новый заказ и состав.
+8. Проверить в Supabase, что `orders.total_amount` равен сумме актуальных `books.price × cart_items.quantity`, а `order_items` содержит `title_snapshot` и `price_snapshot`.
+9. Проверить, что `cart_items` текущего пользователя очищен.
+10. Войти другим пользователем — он не должен видеть заказ первого пользователя.
+11. Войти admin и открыть `/admin → Заказы` — admin должен видеть все заказы и менять статус.
+
+### Ограничения до следующих этапов
+
+- User events не пишутся при оформлении заказа до Stage 18.
+- Рекомендации пока не используют историю заказов до Stage 19.
+- Реальный AI-analysis остается Stage 17.

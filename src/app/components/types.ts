@@ -142,6 +142,50 @@ export interface UserPreferencesRow {
 
 export interface UpdateUserPreferencesInput extends Preferences {}
 
+export type DeliveryType = "pickup" | "courier" | "digital";
+export type OrderStatus = "created" | "processing" | "completed" | "cancelled";
+
+export interface OrderContact {
+  name: string;
+  email: string;
+  phone?: string;
+  address?: string;
+}
+
+export interface OrderRow {
+  id: string;
+  user_id: string;
+  status: OrderStatus;
+  total_amount: number;
+  delivery_type: DeliveryType;
+  contact_json: OrderContact;
+  comment?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface OrderItemRow {
+  id: string;
+  order_id: string;
+  book_id: string | null;
+  title_snapshot: string;
+  price_snapshot: number;
+  quantity: number;
+  created_at?: string | null;
+}
+
+export interface OrderWithItems extends OrderRow {
+  items: OrderItemRow[];
+}
+
+export interface OrderState {
+  orders: OrderRow[];
+  items: OrderItemRow[];
+  loading: boolean;
+  error: string | null;
+}
+
+/** Legacy shape kept for older demo data that is not used by Stage 16 order pages. */
 export interface Order {
   id: string;
   status: "создан" | "в обработке" | "завершен" | "отменен";
