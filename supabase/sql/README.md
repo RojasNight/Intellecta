@@ -45,6 +45,7 @@
 18. `16_user_preferences_rls.sql` — сужает RLS для `public.user_preferences` до owner-only доступа: `user_id = auth.uid()` для select/insert/update/delete.
 19. `17_favorites_rls.sql` — сужает RLS для `public.favorites` до owner-only доступа: `user_id = auth.uid()` для select/insert/delete.
 20. `18_cart_items_rls.sql` — сужает RLS для `public.cart_items` до owner-only доступа: `user_id = auth.uid()` для select/insert/update/delete и проверяет constraints корзины.
+21. `19_orders_rpc_rls.sql` — Stage 16: RLS для `orders`/`order_items`, RPC `create_order_from_cart(...)` и `admin_update_order_status(...)`.
 
 ## Важные правила
 
@@ -131,3 +132,32 @@ order by updated_at desc nulls last;
 ```
 
 SQL Editor может выполняться без app auth-сессии, поэтому RLS-поведение надежнее проверять из приложения под реальными пользователями.
+
+
+## Stage 16 проверки
+
+После запуска `19_orders_rpc_rls.sql` проверьте через приложение:
+
+1. Авторизованный пользователь добавляет активные книги в корзину.
+2. Пользователь открывает `/checkout`, заполняет контакты и нажимает «Оформить заказ».
+3. В `public.orders` появляется заказ с `user_id = auth.uid()`, статусом `created`, `total_amount`, `delivery_type` и `contact_json`.
+4. В `public.order_items` появляются позиции с `title_snapshot`, `price_snapshot` и `quantity`.
+5. `public.cart_items` текущего пользователя очищается.
+6. `/orders` показывает только заказы текущего пользователя.
+7. Другой пользователь не видит эти заказы.
+8. Admin во вкладке `/admin → Заказы` видит все заказы и меняет статус через RPC `admin_update_order_status`.
+9. Обычный пользователь не может напрямую изменить статус или чужой заказ.
+
+Для ручной SQL-проверки структуры:
+
+```sql
+select id, user_id, status, total_amount, delivery_type, contact_json, created_at
+from public.orders
+order by created_at desc;
+
+select order_id, book_id, title_snapshot, price_snapshot, quantity, created_at
+from public.order_items
+order by created_at desc;
+```
+
+Важно: прямые INSERT/UPDATE/DELETE на `orders` и `order_items` не выдаются frontend-роли. Создание заказа выполняется только через RPC, чтобы frontend не мог подменить сумму, цены или snapshot позиций. SQL Editor может выполняться без app auth-сессии, поэтому RLS-поведение надежнее проверять из приложения под реальными пользователями.
