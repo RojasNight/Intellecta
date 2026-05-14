@@ -30,6 +30,31 @@ export interface Book {
 }
 
 
+
+export type AIJobStatus = "running" | "ready" | "failed";
+export type BookAIProfileStatusValue = "stale" | "running" | "ready" | "failed";
+
+export interface AIJobRow {
+  id: string;
+  book_id: string;
+  status: AIJobStatus;
+  started_at?: string;
+  finished_at?: string;
+  error_message?: string;
+  created_at?: string;
+}
+
+export interface BookAIProfileAnalysis {
+  book_id: string;
+  summary: string;
+  topics: string[];
+  keywords: string[];
+  complexity_level: number;
+  emotional_tone: string;
+  updated_at?: string;
+  status?: BookAIProfileStatusValue;
+}
+
 export interface FavoriteRow {
   user_id: string;
   book_id: string;

@@ -18,7 +18,7 @@
 
 ## Current stage/status
 
-Текущий этап: **Stage 16 — оформление заказов через Supabase RPC**.
+Текущий этап: **Stage 17 — реальный AI-analysis lifecycle**.
 
 Готово на предыдущих этапах:
 
@@ -35,7 +35,7 @@
 - Создание и редактирование книг сохраняет `books`, `book_authors`, `book_genres`.
 - Скрытие и восстановление книг работает через `books.is_active`.
 - Обложки загружаются/заменяются через bucket `book-covers`, public URL сохраняется в `books.cover_url`.
-- При создании книги или изменении описания AI-профиль помечается как `pending` для будущего Stage 17.
+- При создании книги или изменении описания AI-профиль помечается как `stale` для повторного серверного ИИ-анализа.
 
 Готово на Stage 13:
 
@@ -77,11 +77,21 @@
 - Вкладка `/admin → Заказы` загружает все заказы для admin и меняет статус через RPC `admin_update_order_status`.
 - Прямые INSERT/UPDATE/DELETE для `orders` и `order_items` не выдаются frontend-роли, чтобы пользователь не мог подменить сумму или статус.
 
-Пока не переносится в рамках Stage 16:
+
+Готово на Stage 17:
+
+- Добавлена серверная функция `api/analyze-book.ts` для запуска ИИ-анализа без раскрытия service role key и AI API keys во frontend.
+- Admin запускает анализ из `/admin → ИИ-анализ`; frontend отправляет только Supabase session token.
+- Функция проверяет admin-роль через `public.profiles.role = 'admin'`.
+- Создается запись в `public.ai_analysis_jobs` со статусом `running`, затем `ready` или `failed`.
+- Результат сохраняется в `public.book_ai_profiles`: `summary`, `topics`, `keywords`, `complexity_level`, `emotional_tone`, `embedding`, `status`.
+- Если `OPENROUTER_API_KEY` не задан или OpenRouter недоступен, используется серверный MVP fallback-анализ: summary из описания, темы/keywords из жанров и текста, complexity/tone по эвристикам, embedding = `null`.
+- RLS для `book_ai_profiles` и `ai_analysis_jobs` переведен в read-only режим для browser clients; прямые insert/update/delete из frontend запрещены.
+
+Пока не переносится в рамках Stage 17:
 
 - Полноценные рекомендации из Supabase.
 - User events.
-- Реальный AI-analysis job pipeline.
 - pgvector/semantic search.
 
 ## Local development in VS Code
@@ -139,8 +149,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 - Production env-переменные задаются в **Vercel Project Settings → Environment Variables**.
 - После изменения env-переменных в Vercel нужен redeploy.
 - Во frontend разрешен только публичный Supabase URL и public/anon key.
-- `SUPABASE_SERVICE_ROLE_KEY` нельзя использовать во frontend, `.env.example`, README-примерах или Vercel client-side variables.
-- `DATABASE_URL`, private OpenAI/API keys и другие server-side secrets нельзя добавлять в браузерный bundle.
+- `SUPABASE_SERVICE_ROLE_KEY` нельзя использовать во frontend или client-side variables. Для Stage 17 он задается только как server-side переменная Vercel Function без `VITE_`/`NEXT_PUBLIC_` prefix.
+- `DATABASE_URL`, private OpenRouter/API keys и другие server-side secrets нельзя добавлять в браузерный bundle.
 
 ## Supabase setup
 
@@ -280,11 +290,12 @@ SQL-скрипты находятся в `supabase/sql/` и применяютс
 14. `11_verify_catalog.sql` — проверка каталога.
 15. `13_storage_book_covers.sql` — bucket `book-covers` и Storage policies.
 16. `14_verify_storage_book_covers.sql` — проверка Storage setup.
-17. `15_admin_book_crud_rpc.sql` — Stage 12 RPC для админского CRUD книг, связей авторов/жанров и pending AI-профиля.
+17. `15_admin_book_crud_rpc.sql` — Stage 12 RPC для админского CRUD книг, связей авторов/жанров и stale AI-профиля.
 18. `16_user_preferences_rls.sql` — Stage 13 own-only RLS для `public.user_preferences`.
 19. `17_favorites_rls.sql` — Stage 14 own-only RLS для `public.favorites`.
 20. `18_cart_items_rls.sql` — Stage 15 own-only RLS и integrity baseline для `public.cart_items`.
 21. `19_orders_rpc_rls.sql` — Stage 16 RLS для заказов, RPC оформления заказа и admin RPC смены статуса.
+22. `20_ai_analysis_lifecycle.sql` — Stage 17 RLS/status baseline для `book_ai_profiles` и `ai_analysis_jobs`.
 
 В папке есть два файла с номером `08_`. На Stage 11 SQL-логику не меняем и файлы не переименовываем, чтобы не ломать существующие ссылки. Порядок выше фиксирует безопасную последовательность запуска.
 
@@ -323,6 +334,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 - `/checkout`
 - `/orders`
 - `/recommendations`
+- `/api/analyze-book` доступен как Vercel Function, не как SPA route.
 
 ## Git workflow
 
@@ -462,8 +474,8 @@ Stage 12 реализует реальное управление книгами
 
 ### Ограничения до Stage 17
 
-- Кнопки реального запуска AI-analysis нет.
-- `book_ai_profiles.status = pending` означает, что книге нужен будущий анализ.
+- До запуска `20_ai_analysis_lifecycle.sql` старые AI-статусы могут быть `pending`/`processing`/`error`.
+- После Stage 17 они нормализуются в `stale`/`running`/`ready`/`failed`.
 - Embedding/pgvector и semantic ranking не реализуются на Stage 12.
 
 ## Stage 14 — Favorites in Supabase
@@ -545,10 +557,175 @@ Stage 15 реализует настоящую пользовательскую 
 - История `/orders` загружается из `public.orders` и `public.order_items` по RLS.
 - Админ-панель показывает реальные заказы и обновляет статус через `admin_update_order_status`.
 
+## Stage 17 — AI-analysis lifecycle через OpenRouter
+
+Stage 17 реализует безопасный серверный lifecycle ИИ-анализа книги через Vercel Serverless Function `POST /api/analyze-book`. Frontend не вызывает OpenRouter напрямую и не содержит `OPENROUTER_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` или другие приватные ключи. React отправляет только `bookId` и Supabase access token текущего admin-пользователя в `Authorization: Bearer <token>`.
+
+### Зачем нужен Stage 17
+
+Этап подготавливает каталог к будущим рекомендациям и semantic search: для книги создается семантический профиль с кратким содержанием, темами, ключевыми словами, уровнем сложности, эмоциональным тоном и опциональным embedding. Recommendations, `user_events`, semantic search и checkout UX в этом этапе не реализуются.
+
+### Используемые таблицы
+
+- `public.books` — источник `title`, `description` и связей с авторами/жанрами.
+- `public.profiles` — проверка `role = 'admin'`.
+- `public.ai_analysis_jobs` — журнал запусков: `running`, `ready`, `failed`, `started_at`, `finished_at`, `error_message`.
+- `public.book_ai_profiles` — результат анализа: `summary`, `topics`, `keywords`, `complexity_level`, `emotional_tone`, `embedding`, `status`, `updated_at`.
+
+### Endpoint `/api/analyze-book`
+
+Контракт запроса:
+
+```http
+POST /api/analyze-book
+Authorization: Bearer <supabase_access_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "bookId": "uuid"
+}
+```
+
+Что делает serverless function:
+
+1. Разрешает только `POST`; остальные методы получают `405`.
+2. Валидирует JSON body и обязательный строковый `bookId`.
+3. Проверяет Supabase access token через `auth.getUser(accessToken)`.
+4. Через server-only Supabase client с `SUPABASE_SERVICE_ROLE_KEY` проверяет `profiles.role === 'admin'`.
+5. Загружает книгу, авторов и жанры.
+6. Создает job со статусом `running`.
+7. Если нет `description`, завершает job как `failed` с безопасным сообщением `Book has no description or text fragment for AI analysis`.
+8. Вызывает OpenRouter chat completions и требует строго валидный JSON.
+9. Валидирует поля `summary`, `topics`, `keywords`, `complexity_level`, `emotional_tone`.
+10. Если OpenRouter недоступен, ключ отсутствует, лимит исчерпан или JSON невалиден — использует локальный deterministic MVP fallback.
+11. Если задан `OPENROUTER_EMBEDDING_MODEL`, пробует получить embedding через OpenRouter embeddings endpoint.
+12. Если embedding не настроен или запрос embedding завершился ошибкой, сохраняет `embedding = null` и не считает это ошибкой Stage 17.
+13. Делает upsert в `book_ai_profiles` по `book_id`.
+14. Обновляет job на `ready` или `failed`.
+
+Ответ успеха:
+
+```json
+{
+  "ok": true,
+  "job": {
+    "id": "uuid",
+    "book_id": "uuid",
+    "status": "ready",
+    "started_at": "...",
+    "finished_at": "...",
+    "error_message": null
+  },
+  "profile": {
+    "book_id": "uuid",
+    "summary": "...",
+    "topics": ["..."],
+    "keywords": ["..."],
+    "complexity_level": 3,
+    "emotional_tone": "познавательный",
+    "embedding": null,
+    "status": "ready",
+    "updated_at": "..."
+  },
+  "fallbackUsed": false
+}
+```
+
+### Server-side env для Vercel
+
+Добавьте в Vercel Project Settings. Эти переменные не должны иметь prefix `VITE_` или `NEXT_PUBLIC_`.
+
+```env
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=openrouter/free
+OPENROUTER_EMBEDDING_MODEL=
+APP_URL=
+```
+
+`OPENROUTER_MODEL` можно заменить на любую доступную модель, например `some/model:free`. Конкретная бесплатная модель не хардкодится, потому что список бесплатных моделей OpenRouter может меняться.
+
+### Почему frontend не вызывает OpenRouter напрямую
+
+OpenRouter API key и Supabase service role key являются приватными секретами. Если вызвать OpenRouter из React-компонента, ключ попадет в browser bundle или network-запросы. Поэтому frontend использует только Supabase anon key и access token пользователя, а внешняя AI-интеграция выполняется только в serverless function.
+
+### MVP fallback без внешнего AI API
+
+Fallback полностью локальный, deterministic и не использует внешний provider:
+
+- `summary` берется из первых 1–2 предложений описания или осторожно собирается из title/authors/genres;
+- `topics` формируются из жанров и частотных значимых слов описания;
+- `keywords` извлекаются из описания со стоп-словами и lowercase-нормализацией;
+- `complexity_level` рассчитывается по длине и сложности текста от 1 до 5;
+- `emotional_tone` определяется простым словарем (`напряжённый`, `романтичный`, `динамичный`, `познавательный`, иначе `нейтральный`);
+- `embedding` в fallback всегда `null`.
+
+Fallback используется, если `OPENROUTER_API_KEY` не задан, OpenRouter вернул ошибку/лимит, модель недоступна или ответ не является валидным JSON. Job при этом может стать `ready`, а ответ содержит `fallbackUsed: true`.
+
+### Embedding до Stage 19
+
+`OPENROUTER_EMBEDDING_MODEL` опционален. Если он не задан или embeddings endpoint возвращает ошибку, `embedding` сохраняется как `null`; это нормальное MVP-поведение до Stage 19/20. Production-логика не генерирует fake-vector. Если в Supabase включен pgvector, function пробует сохранить embedding как vector-compatible literal; если формат/размерность не подходят текущей схеме, сохраняется `null`, чтобы не ломать анализ книги.
+
+### SQL для Stage 17
+
+Перед проверкой выполните в Supabase SQL Editor:
+
+```sql
+-- supabase/sql/20_ai_analysis_lifecycle.sql
+```
+
+Скрипт:
+
+- нормализует статусы в `stale/running/ready/failed` для профилей и `running/ready/failed` для jobs;
+- запрещает direct insert/update/delete в `book_ai_profiles` и `ai_analysis_jobs` для browser roles;
+- разрешает чтение `ready` AI-профилей активных книг;
+- разрешает admin читать все AI-профили и jobs;
+- оставляет запись анализа только server-side через service role.
+
+### Как проверить результат вручную
+
+1. Выполнить `supabase/sql/20_ai_analysis_lifecycle.sql`.
+2. Добавить server-only env в Vercel и сделать redeploy без cache.
+3. Войти admin-пользователем.
+4. Открыть `/admin → ИИ-анализ`.
+5. Нажать «Запустить ИИ-анализ» для книги с заполненным описанием.
+6. Проверить в Supabase:
+
+```sql
+select id, book_id, status, started_at, finished_at, error_message
+from public.ai_analysis_jobs
+order by started_at desc;
+
+select book_id, summary, topics, keywords, complexity_level, emotional_tone, embedding, status, updated_at
+from public.book_ai_profiles
+order by updated_at desc;
+```
+
+### Testing checklist Stage 17
+
+- Admin запускает анализ книги с `description`: job `running → ready`, профиль сохранен, UI показывает summary/topics/keywords/complexity/tone.
+- Admin запускает анализ книги без `description`: job `failed`, safe `error_message`, UI показывает понятную ошибку.
+- Несуществующий `bookId`: безопасная ошибка без SQL/provider деталей.
+- Не-admin вызывает endpoint: `403`, записи не создаются.
+- Пользователь без session вызывает endpoint: `401`.
+- `OPENROUTER_API_KEY` отсутствует: работает fallback, job становится `ready`, `fallbackUsed = true`.
+- OpenRouter возвращает invalid JSON: работает fallback, job становится `ready`, `fallbackUsed = true`.
+- `npm run build` проходит успешно.
+
+### Ограничения после Stage 17
+
+- User events еще не пишутся до Stage 18.
+- Recommendations еще не используют AI-профили до Stage 19.
+- Semantic search/pgvector остается Stage 20.
+
 ## Next stages backlog
 
 - Stage 18: User Events.
 - Stage 19: Recommendations на основе preferences, favorites, cart/orders и AI-профилей.
+- Stage 20: Semantic search / pgvector.
 
 
 ## Stage 16 — Orders RPC
@@ -596,4 +773,3 @@ Stage 16 реализует безопасное оформление заказ
 
 - User events не пишутся при оформлении заказа до Stage 18.
 - Рекомендации пока не используют историю заказов до Stage 19.
-- Реальный AI-analysis остается Stage 17.

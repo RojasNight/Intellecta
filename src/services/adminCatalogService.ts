@@ -1,7 +1,7 @@
 import { getSupabaseClient } from "../lib/supabase";
 
 export type BookFormatValue = "paper" | "ebook" | "audiobook";
-export type BookAiProfileStatus = "pending" | "processing" | "ready" | "error";
+export type BookAiProfileStatus = "stale" | "running" | "ready" | "failed";
 
 export interface Author {
   id: string;
@@ -113,8 +113,10 @@ function toBookFormat(value: string | null | undefined): BookFormatValue {
 }
 
 function toAiStatus(value: string | null | undefined): BookAiProfileStatus {
-  if (value === "processing" || value === "ready" || value === "error" || value === "pending") return value;
-  return "pending";
+  if (value === "ready") return "ready";
+  if (value === "running" || value === "processing") return "running";
+  if (value === "failed" || value === "error") return "failed";
+  return "stale";
 }
 
 function normalizeArray<T>(value: T[] | null | undefined): T[] {

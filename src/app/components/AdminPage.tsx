@@ -9,6 +9,7 @@ import {
   Layout,
   LayoutDashboard,
   Pencil,
+  Play,
   Plus,
   RefreshCw,
   Sparkles,
@@ -16,7 +17,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { BRAND } from "./brand";
-import type { OrderStatus, OrderWithItems } from "./types";
+import type { AIJobRow, AIJobStatus, OrderStatus, OrderWithItems } from "./types";
 import { Breadcrumbs, EmptyState, GhostButton, Notice, PrimaryButton, SectionTitle, StatusBadge } from "./shared";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { useAuth } from "../auth/AuthContext";
@@ -45,6 +46,7 @@ import {
 } from "../../services/storageService";
 import { SupabaseStatus } from "./SupabaseStatus";
 import { adminGetOrders, adminUpdateOrderStatus } from "../../services/orderService";
+import { analyzeBook, getAdminAIJobs } from "../../services/aiAnalysisService";
 
 type AdminTab = "overview" | "books" | "orders" | "ai" | "logs";
 type BookFormSubmit = { input: CreateBookInput; coverFile: File | null };
@@ -93,15 +95,15 @@ function getFormatLabel(value: BookFormatValue) {
 
 function aiStatusLabel(status?: BookAiProfileStatus | null) {
   if (status === "ready") return "Готово";
-  if (status === "processing") return "Выполняется";
-  if (status === "error") return "Ошибка";
+  if (status === "running") return "Выполняется";
+  if (status === "failed") return "Ошибка";
   return "Требуется анализ";
 }
 
 function aiStatusTone(status?: BookAiProfileStatus | null): "ok" | "warn" | "err" | "info" {
   if (status === "ready") return "ok";
-  if (status === "processing") return "warn";
-  if (status === "error") return "err";
+  if (status === "running") return "warn";
+  if (status === "failed") return "err";
   return "info";
 }
 
@@ -128,6 +130,7 @@ export function AdminPage() {
   const [authors, setAuthors] = useState<Author[]>([]);
   const [genres, setGenres] = useState<Genre[]>([]);
   const [orders, setOrders] = useState<OrderWithItems[]>([]);
+  const [aiJobs, setAiJobs] = useState<AIJobRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { isAdmin } = useAuth();
@@ -137,16 +140,18 @@ export function AdminPage() {
     setError(null);
 
     try {
-      const [nextBooks, nextAuthors, nextGenres, nextOrders] = await Promise.all([
+      const [nextBooks, nextAuthors, nextGenres, nextOrders, nextAIJobs] = await Promise.all([
         getAdminBooks(),
         getAuthors(),
         getGenres(),
         adminGetOrders(),
+        getAdminAIJobs(),
       ]);
       setBooks(nextBooks);
       setAuthors(nextAuthors);
       setGenres(nextGenres);
       setOrders(nextOrders);
+      setAiJobs(nextAIJobs);
     } catch (err) {
       const message = getErrorMessage(err, "Не удалось загрузить данные админ-панели.");
       setError(message);
@@ -180,7 +185,7 @@ export function AdminPage() {
         Панель администратора
       </h1>
       <p style={{ color: BRAND.slate, marginTop: 4, fontSize: 14 }}>
-        Реальное управление каталогом и заказами в Supabase. ИИ-анализ остается демонстрационным до Stage 17.
+        Реальное управление каталогом, заказами и серверным ИИ-анализом в Supabase/Vercel.
       </p>
 
       <div className="md:hidden mt-5 flex gap-2 overflow-x-auto no-scrollbar">
@@ -214,7 +219,7 @@ export function AdminPage() {
             />
           )}
           {tab === "orders" && <OrdersTab orders={orders} setOrders={setOrders} />}
-          {tab === "ai" && <AITab books={books} />}
+          {tab === "ai" && <AITab books={books} jobs={aiJobs} onReload={loadAdminData} />}
           {tab === "logs" && <LogsTab />}
         </section>
       </div>
@@ -255,7 +260,7 @@ function Overview({ books, orders, go, loading, onReload }: {
   const total = books.length;
   const active = books.filter((b) => b.is_active).length;
   const aiReady = books.filter((b) => b.ai_profile?.status === "ready").length;
-  const aiPending = books.filter((b) => !b.ai_profile || b.ai_profile.status === "pending").length;
+  const aiPending = books.filter((b) => !b.ai_profile || b.ai_profile.status === "stale" || b.ai_profile.status === "failed").length;
 
   return (
     <div>
@@ -278,12 +283,12 @@ function Overview({ books, orders, go, loading, onReload }: {
 
       <div className="mt-8 rounded-xl border p-5" style={{ background: "white", borderColor: BRAND.beige }}>
         <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18, marginBottom: 8 }}>
-          Что реально сохраняется на Stage 12
+          Что реально сохраняется на текущем этапе
         </div>
         <ul className="space-y-2" style={{ color: BRAND.charcoal, fontSize: 14 }}>
           <li>• Книги, авторы/жанры-связи и cover_url сохраняются в Supabase.</li>
           <li>• Скрытие книги выполняется через <code>books.is_active = false</code>, без физического удаления.</li>
-          <li>• При изменении описания AI-профиль помечается как <code>pending</code> для будущего анализа.</li>
+          <li>• При изменении описания AI-профиль помечается как <code>stale</code>, затем admin запускает серверный анализ.</li>
         </ul>
       </div>
     </div>
@@ -692,9 +697,9 @@ function BookForm({ book, authors, genres, saving, onCancel, onSubmit }: {
         </p>
       </div>
 
-      {book?.ai_profile?.status === "pending" && (
+      {(book?.ai_profile?.status === "stale" || book?.ai_profile?.status === "failed") && (
         <Notice tone="info" title="Требуется ИИ-анализ">
-          Профиль книги находится в статусе pending. Полноценный запуск анализа будет реализован на Stage 17.
+          Профиль книги требует повторного серверного ИИ-анализа после изменения описания.
         </Notice>
       )}
 
@@ -825,35 +830,100 @@ function RelationPicker({ label, required, error, emptyText, items, selectedIds,
   );
 }
 
-function AITab({ books }: { books: BookAdminRow[] }) {
+function aiJobStatusLabel(status?: AIJobStatus | null) {
+  if (status === "ready") return "Готово";
+  if (status === "failed") return "Ошибка";
+  return "Выполняется";
+}
+
+function aiJobStatusTone(status?: AIJobStatus | null): "ok" | "warn" | "err" | "info" {
+  if (status === "ready") return "ok";
+  if (status === "failed") return "err";
+  return "warn";
+}
+
+function AITab({ books, jobs, onReload }: { books: BookAdminRow[]; jobs: AIJobRow[]; onReload: () => Promise<void> }) {
+  const [runningBookIds, setRunningBookIds] = useState<string[]>([]);
+  const jobsByBook = useMemo(() => {
+    const map = new Map<string, AIJobRow>();
+    for (const job of jobs) {
+      if (!map.has(job.book_id)) map.set(job.book_id, job);
+    }
+    return map;
+  }, [jobs]);
+
+  const runAnalysis = async (book: BookAdminRow) => {
+    setRunningBookIds((ids) => Array.from(new Set([...ids, book.id])));
+    try {
+      const result = await analyzeBook(book.id);
+      const providerLabel = result.fallbackUsed ? "MVP fallback" : "OpenRouter";
+      toast.success(`ИИ-анализ завершён: ${book.title} (${providerLabel})`);
+      await onReload();
+    } catch (err) {
+      const message = getErrorMessage(err, "Не удалось запустить ИИ-анализ.");
+      toast.error(message);
+      await onReload().catch(() => undefined);
+    } finally {
+      setRunningBookIds((ids) => ids.filter((id) => id !== book.id));
+    }
+  };
+
   return (
     <div>
-      <SectionTitle sub="На Stage 12 настоящий запуск ИИ не реализуется. Здесь виден статус профиля книги.">
+      <SectionTitle sub="Запуск анализа выполняется через Vercel Serverless Function /api/analyze-book. Frontend отправляет только admin session token; OpenRouter API key и service role key остаются на сервере.">
         ИИ-анализ книг
       </SectionTitle>
-      <Notice tone="info" title="Запуск анализа будет реализован на Stage 17">
-        Создание и изменение описания книги помечает AI-профиль как pending. Это честный статус без имитации выполнения анализа.
+      <Notice tone="info" title="Stage 17: серверный AI-analysis lifecycle">
+        Кнопка запуска создает job в <code>ai_analysis_jobs</code>, анализирует описание книги, сохраняет признаки в <code>book_ai_profiles</code> и обновляет статус на <code>ready</code> или <code>failed</code>. Если OpenRouter недоступен, исчерпал лимит, вернул ошибку или невалидный JSON, используется безопасный MVP fallback на сервере.
       </Notice>
 
       <div className="space-y-3 mt-4">
-        {books.map((b) => (
-          <div key={b.id} className="rounded-xl border p-5 grid gap-4 md:grid-cols-[1fr_auto]" style={{ background: "white", borderColor: BRAND.beige }}>
-            <div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18 }}>{b.title}</div>
-                <StatusBadge status={aiStatusLabel(b.ai_profile?.status)} tone={aiStatusTone(b.ai_profile?.status)} />
+        {books.map((b) => {
+          const latestJob = jobsByBook.get(b.id);
+          const isRunning = runningBookIds.includes(b.id) || b.ai_profile?.status === "running" || latestJob?.status === "running";
+          const canRun = Boolean(b.description?.trim()) && !isRunning;
+
+          return (
+            <div key={b.id} className="rounded-xl border p-5 grid gap-4 md:grid-cols-[1fr_auto]" style={{ background: "white", borderColor: BRAND.beige }}>
+              <div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="font-serif" style={{ color: BRAND.navy, fontSize: 18 }}>{b.title}</div>
+                  <StatusBadge status={aiStatusLabel(b.ai_profile?.status)} tone={aiStatusTone(b.ai_profile?.status)} />
+                  {latestJob && <StatusBadge status={`Job: ${aiJobStatusLabel(latestJob.status)}`} tone={aiJobStatusTone(latestJob.status)} />}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-4 mt-3" style={{ fontSize: 13 }}>
+                  <CardKV label="Профиль обновлен">{shortDate(b.ai_profile?.updated_at)}</CardKV>
+                  <CardKV label="Последний job">{shortDate(latestJob?.finished_at ?? latestJob?.started_at)}</CardKV>
+                  <CardKV label="Темы">{b.ai_profile?.topics.join(", ") || "—"}</CardKV>
+                  <CardKV label="Сложность">{b.ai_profile?.complexity_level ?? "—"}</CardKV>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 mt-3" style={{ fontSize: 13 }}>
+                  <CardKV label="Ключевые слова">{b.ai_profile?.keywords.join(", ") || "—"}</CardKV>
+                  <CardKV label="Эмоциональный тон">{b.ai_profile?.emotional_tone || "—"}</CardKV>
+                </div>
+                <div className="mt-3" style={{ color: BRAND.charcoal, fontSize: 14 }}>
+                  {b.ai_profile?.summary || "ИИ-сводка пока не готова."}
+                </div>
+                {latestJob?.error_message && (
+                  <div className="mt-3 rounded-md border px-3 py-2" style={{ color: "#8C2A2A", borderColor: "#E8C5C5", background: "#FFF8F8", fontSize: 13 }}>
+                    {latestJob.error_message}
+                  </div>
+                )}
+                {!b.description?.trim() && (
+                  <div className="mt-3" style={{ color: "#8C2A2A", fontSize: 13 }}>
+                    Для анализа нужно заполнить описание книги.
+                  </div>
+                )}
               </div>
-              <div className="grid gap-3 sm:grid-cols-3 mt-3" style={{ fontSize: 13 }}>
-                <CardKV label="Обновлено">{shortDate(b.ai_profile?.updated_at)}</CardKV>
-                <CardKV label="Темы">{b.ai_profile?.topics.join(", ") || "—"}</CardKV>
-                <CardKV label="Ключевые слова">{b.ai_profile?.keywords.join(", ") || "—"}</CardKV>
-              </div>
-              <div className="mt-3" style={{ color: BRAND.charcoal, fontSize: 14 }}>
-                {b.ai_profile?.summary || "ИИ-сводка пока не готова."}
+              <div className="flex md:flex-col gap-2 md:items-end">
+                <PrimaryButton disabled={!canRun} onClick={() => void runAnalysis(b)}>
+                  {isRunning ? <RefreshCw size={14} /> : <Play size={14} />}
+                  {isRunning ? "Анализ…" : "Запустить ИИ-анализ"}
+                </PrimaryButton>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1023,9 +1093,9 @@ function AdminOrderItems({ order }: { order: OrderWithItems }) {
 
 function LogsTab() {
   const logs = [
-    { ts: "2026-05-11 13:20", level: "info", msg: "Stage 12: Admin CRUD работает через Supabase RPC" },
-    { ts: "2026-05-11 13:15", level: "info", msg: "Storage bucket book-covers используется только для публичных обложек" },
-    { ts: "2026-05-11 13:10", level: "warn", msg: "ИИ-анализ не запускается до Stage 17" },
+    { ts: "2026-05-13 14:30", level: "info", msg: "Stage 17: ИИ-анализ запускается через серверную функцию /api/analyze-book" },
+    { ts: "2026-05-13 14:20", level: "info", msg: "book_ai_profiles и ai_analysis_jobs защищены RLS от прямой записи из frontend" },
+    { ts: "2026-05-13 14:10", level: "warn", msg: "Если OPENROUTER_API_KEY не задан или OpenRouter недоступен, используется серверный MVP fallback-анализ" },
   ];
   return (
     <div>

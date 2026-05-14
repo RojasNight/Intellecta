@@ -43,7 +43,7 @@ export type CatalogViewRow = {
   ai_keywords: string[] | null;
   complexity_level: number | null;
   emotional_tone: string | null;
-  ai_status: "pending" | "processing" | "ready" | "error" | string | null;
+  ai_status: "stale" | "running" | "ready" | "failed" | "pending" | "processing" | "error" | string | null;
   ai_updated_at: string | null;
 };
 
@@ -73,9 +73,9 @@ function toComplexity(value: number | null | undefined): Complexity {
 }
 
 function toAiStatus(value: string | null | undefined): Book["ai"]["status"] {
-  if (value === "processing") return "Выполняется";
+  if (value === "running" || value === "processing") return "Выполняется";
   if (value === "ready") return "Готово";
-  if (value === "error") return "Ошибка";
+  if (value === "failed" || value === "error") return "Ошибка";
   return "В очереди";
 }
 

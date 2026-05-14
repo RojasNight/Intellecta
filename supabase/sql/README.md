@@ -46,6 +46,7 @@
 19. `17_favorites_rls.sql` — сужает RLS для `public.favorites` до owner-only доступа: `user_id = auth.uid()` для select/insert/delete.
 20. `18_cart_items_rls.sql` — сужает RLS для `public.cart_items` до owner-only доступа: `user_id = auth.uid()` для select/insert/update/delete и проверяет constraints корзины.
 21. `19_orders_rpc_rls.sql` — Stage 16: RLS для `orders`/`order_items`, RPC `create_order_from_cart(...)` и `admin_update_order_status(...)`.
+22. `20_ai_analysis_lifecycle.sql` — Stage 17: RLS/status baseline для `book_ai_profiles` и `ai_analysis_jobs`, read-only browser access, stale/running/ready/failed statuses.
 
 ## Важные правила
 
@@ -161,3 +162,31 @@ order by created_at desc;
 ```
 
 Важно: прямые INSERT/UPDATE/DELETE на `orders` и `order_items` не выдаются frontend-роли. Создание заказа выполняется только через RPC, чтобы frontend не мог подменить сумму, цены или snapshot позиций. SQL Editor может выполняться без app auth-сессии, поэтому RLS-поведение надежнее проверять из приложения под реальными пользователями.
+
+
+## Stage 17 проверки
+
+После запуска `20_ai_analysis_lifecycle.sql` проверьте через приложение:
+
+1. В Vercel Project Settings добавлен server-only `SUPABASE_SERVICE_ROLE_KEY`.
+2. Опционально добавлен `OPENROUTER_API_KEY`; если его нет или OpenRouter недоступен, серверная функция использует MVP fallback.
+3. Admin открывает `/admin → ИИ-анализ` и запускает анализ книги с заполненным описанием.
+4. В `public.ai_analysis_jobs` создается job со статусом `running`, затем `ready` или `failed`.
+5. В `public.book_ai_profiles` создается/обновляется профиль со статусом `ready`, `summary`, `topics`, `keywords`, `complexity_level`, `emotional_tone`.
+6. Книга без описания должна завершать job статусом `failed` и понятным `error_message`.
+7. Обычный пользователь не может вызвать `/api/analyze-book` успешно.
+8. Прямые INSERT/UPDATE/DELETE в `book_ai_profiles` и `ai_analysis_jobs` из browser client должны быть запрещены.
+
+Для ручной SQL-проверки структуры:
+
+```sql
+select book_id, status, summary, topics, keywords, complexity_level, emotional_tone, updated_at
+from public.book_ai_profiles
+order by updated_at desc nulls last;
+
+select id, book_id, status, started_at, finished_at, error_message, created_at
+from public.ai_analysis_jobs
+order by created_at desc;
+```
+
+Важно: browser frontend использует только anon key и admin session token. `SUPABASE_SERVICE_ROLE_KEY` используется только в Vercel Serverless Function `/api/analyze-book` и не должен иметь prefix `VITE_` или `NEXT_PUBLIC_`.

@@ -18,8 +18,16 @@ import {
   SemanticBadge,
   EmptyState,
   SkeletonCard,
+  StatusBadge,
 } from "./shared";
 import type { Book } from "./types";
+
+function aiStatusTone(status: Book["ai"]["status"]): "ok" | "warn" | "err" | "info" {
+  if (status === "Готово") return "ok";
+  if (status === "Ошибка") return "err";
+  if (status === "Выполняется") return "warn";
+  return "info";
+}
 
 export function BookDetailsPage() {
   const { bookId } = useParams<{ bookId: string }>();
@@ -219,6 +227,7 @@ export function BookDetailsPage() {
               <h2 id="ai-block" className="font-serif" style={{ fontSize: 18 }}>
                 Интеллектуальный анализ
               </h2>
+              <StatusBadge status={`AI status: ${book.ai.status}`} tone={aiStatusTone(book.ai.status)} />
               <span style={{ color: BRAND.gray, fontSize: 12 }}>· обновлён {book.ai.updatedAt}</span>
             </header>
             <div className="p-5 space-y-5">
