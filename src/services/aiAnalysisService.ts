@@ -82,12 +82,58 @@ export function getAIAnalysisErrorMessage(error: unknown): string {
   return message || "Не удалось выполнить ИИ-анализ книги.";
 }
 
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type AdminBookIdentifierRow = {
+  id?: string | null;
+  slug?: string | null;
+  title?: string | null;
+};
+
+function normalizeIdentifier(value: string): string {
+  return value.trim();
+}
+
+function isUuid(value: string): boolean {
+  return UUID_RE.test(value.trim());
+}
+
+function sameIdentifier(left: string | null | undefined, right: string): boolean {
+  if (!left) return false;
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+async function resolveBookUuid(supabase: ReturnType<typeof getSupabaseClient>, rawBookId: string): Promise<string> {
+  const identifier = normalizeIdentifier(rawBookId);
+  if (isUuid(identifier)) return identifier;
+
+  // Admin UI should pass books.id, but older UI builds / cached rows may pass slug or title.
+  // Resolve it client-side before calling /api/analyze-book, because the server endpoint
+  // intentionally accepts only UUID bookId for a strict Stage 17 contract.
+  const { data, error } = await supabase.rpc("admin_get_books");
+  if (error) throw new Error(getAIAnalysisErrorMessage(error));
+
+  const rows = (data ?? []) as AdminBookIdentifierRow[];
+  const match = rows.find((row) =>
+    sameIdentifier(row.id, identifier)
+    || sameIdentifier(row.slug, identifier)
+    || sameIdentifier(row.title, identifier)
+  );
+
+  if (match?.id && isUuid(match.id)) return match.id.trim();
+
+  throw new Error(`Frontend передал не UUID книги: ${identifier}. Проверьте, что кнопка ИИ-анализа использует books.id из Supabase.`);
+}
+
 export async function analyzeBook(bookId: string): Promise<AIAnalysisResponse> {
   if (!bookId || typeof bookId !== "string") {
     throw new Error("Некорректный идентификатор книги.");
   }
 
   const supabase = getSupabaseClient();
+  const resolvedBookId = await resolveBookUuid(supabase, bookId);
+
   const { data, error } = await supabase.auth.getSession();
   if (error) throw new Error(getAIAnalysisErrorMessage(error));
 
@@ -100,7 +146,7 @@ export async function analyzeBook(bookId: string): Promise<AIAnalysisResponse> {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ bookId }),
+    body: JSON.stringify({ bookId: resolvedBookId }),
   });
 
   const payload = await response.json().catch(() => ({ ok: false, error: "Некорректный ответ серверной функции." })) as AIAnalysisResponse;

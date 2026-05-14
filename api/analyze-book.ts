@@ -56,6 +56,32 @@ function extractBearerToken(req) {
   return match?.[1]?.trim() || "";
 }
 
+
+async function resolveBookId(supabase, rawIdentifier) {
+  const identifier = String(rawIdentifier || "").trim();
+  if (UUID_RE.test(identifier)) return identifier;
+
+  const { data: bySlug, error: slugError } = await supabase
+    .from("books")
+    .select("id")
+    .eq("slug", identifier)
+    .maybeSingle();
+
+  if (slugError) throw slugError;
+  if (bySlug?.id) return bySlug.id;
+
+  const { data: byTitle, error: titleError } = await supabase
+    .from("books")
+    .select("id")
+    .eq("title", identifier)
+    .maybeSingle();
+
+  if (titleError) throw titleError;
+  if (byTitle?.id) return byTitle.id;
+
+  throw new HttpError(400, "Некорректный идентификатор книги.");
+}
+
 function redactSensitive(value) {
   return String(value || "")
     .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [redacted]")
@@ -457,9 +483,12 @@ export default async function handler(req, res) {
     return json(res, 400, { ok: false, error: "Некорректный JSON в теле запроса." });
   }
 
-  const bookId = typeof body?.bookId === "string" ? body.bookId.trim() : "";
-  if (!bookId) return json(res, 400, { ok: false, error: "bookId обязателен." });
-  if (!UUID_RE.test(bookId)) return json(res, 400, { ok: false, error: "Некорректный идентификатор книги." });
+  const rawBookId = typeof body?.bookId === "string"
+    ? body.bookId.trim()
+    : typeof body?.book_id === "string"
+      ? body.book_id.trim()
+      : "";
+  if (!rawBookId) return json(res, 400, { ok: false, error: "bookId обязателен." });
 
   const token = extractBearerToken(req);
   if (!token) return json(res, 401, { ok: false, error: "Требуется авторизация." });
@@ -469,6 +498,7 @@ export default async function handler(req, res) {
   });
 
   let jobId = null;
+  let bookId = rawBookId;
 
   try {
     const { data: authData, error: authError } = await supabase.auth.getUser(token);
@@ -483,6 +513,7 @@ export default async function handler(req, res) {
     if (profileError) throw profileError;
     if (profile?.role !== "admin") throw new HttpError(403, "Недостаточно прав для запуска ИИ-анализа.");
 
+    bookId = await resolveBookId(supabase, rawBookId);
     const context = await loadBookContext(supabase, bookId);
     const job = await createJob(supabase, bookId);
     jobId = job.id;
