@@ -1,9 +1,10 @@
 import { ArrowLeft, Heart, Info, ShoppingCart, Sparkles, Star } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { BRAND } from "./brand";
 import { getBookBySlug, getCatalogBooks } from "../../services/catalogService";
+import { logBookView, logRecommendationClick } from "../../services/userEventService";
 import { useAppContext } from "./Root";
 import {
   AvailabilityBadge,
@@ -39,6 +40,7 @@ export function BookDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loggedBookViewsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -55,6 +57,10 @@ export function BookDetailsPage() {
           return;
         }
         setBook(loaded);
+        if (!loggedBookViewsRef.current.has(loaded.id)) {
+          loggedBookViewsRef.current.add(loaded.id);
+          void logBookView(loaded.id);
+        }
         try {
           const candidates = await getCatalogBooks({ limit: 40 });
           if (!cancelled) {
@@ -327,7 +333,10 @@ export function BookDetailsPage() {
                   cartDisabled={cartPendingBookIds.includes(b.id)}
                   onToggleFav={() => toggleFav(b.id)}
                   onAddToCart={() => addToCart(b.id)}
-                  onOpen={() => navigate(`/book/${b.slug || b.id}`)}
+                  onOpen={() => {
+                    void logRecommendationClick(b.id, `similar:${book.id}:${b.id}`);
+                    navigate(`/book/${b.slug || b.id}`);
+                  }}
                 />
               </div>
             ))}

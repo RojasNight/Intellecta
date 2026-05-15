@@ -211,7 +211,7 @@ create table if not exists public.user_events (
   created_at timestamptz not null default now(),
   constraint user_events_event_type_check check (
     event_type in (
-      'view',
+      'book_view',
       'favorite_add',
       'favorite_remove',
       'cart_add',

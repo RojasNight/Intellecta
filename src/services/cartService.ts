@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "../lib/supabase";
 import { mapCatalogRowToBook, type CatalogViewRow } from "./catalogService";
 import type { Book, CartItem, CartItemRow } from "../app/components/types";
+import { logCartAdd, logCartRemove } from "./userEventService";
 
 export type AddToCartInput = { bookId: string; quantity?: number };
 export type UpdateCartQuantityInput = { itemId?: string; bookId?: string; quantity: number };
@@ -252,7 +253,9 @@ export async function addToCart(bookId: string, quantity = 1): Promise<CartItem>
     const row = normalizeCartItem(existing);
     if (!row) throw createServiceError("Supabase вернул некорректную позицию корзины");
     const nextQty = clampQuantity(row.quantity + requestedQty, book.inStock || DEFAULT_MAX_QTY);
-    return updateCartItemQuantity(row.id, nextQty);
+    const updated = await updateCartItemQuantity(row.id, nextQty);
+    void logCartAdd(bookId, requestedQty);
+    return updated;
   }
 
   const payload = { user_id: userId, book_id: bookId, quantity: requestedQty };
@@ -264,13 +267,16 @@ export async function addToCart(bookId: string, quantity = 1): Promise<CartItem>
 
   if (error) {
     if (isDuplicateCartError(error)) {
-      return updateCartBookQuantity(bookId, requestedQty + 1);
+      const updated = await updateCartBookQuantity(bookId, requestedQty + 1);
+      void logCartAdd(bookId, requestedQty);
+      return updated;
     }
     throw createServiceError("Не удалось добавить книгу в корзину", error);
   }
 
   const row = normalizeCartItem(data);
   if (!row) throw createServiceError("Supabase вернул некорректную позицию корзины");
+  void logCartAdd(bookId, requestedQty);
   return toCartItem(row, book);
 }
 
@@ -332,6 +338,16 @@ export async function removeCartItem(itemId: string): Promise<void> {
 
   const userId = await getCurrentUserId();
   const supabase = getSupabaseClient();
+  const { data: existing, error: existingError } = await supabase
+    .from("cart_items")
+    .select("id, user_id, book_id, quantity, created_at, updated_at")
+    .eq("user_id", userId)
+    .eq("id", itemId)
+    .maybeSingle();
+
+  if (existingError) throw createServiceError("Не удалось проверить позицию корзины", existingError);
+  const row = normalizeCartItem(existing);
+
   const { error } = await supabase
     .from("cart_items")
     .delete()
@@ -339,6 +355,7 @@ export async function removeCartItem(itemId: string): Promise<void> {
     .eq("id", itemId);
 
   if (error) throw createServiceError("Не удалось удалить книгу из корзины", error);
+  if (row) void logCartRemove(row.book_id);
 }
 
 export async function removeCartBook(bookId: string): Promise<void> {
@@ -353,10 +370,12 @@ export async function removeCartBook(bookId: string): Promise<void> {
     .eq("book_id", bookId);
 
   if (error) throw createServiceError("Не удалось удалить книгу из корзины", error);
+  void logCartRemove(bookId);
 }
 
 export async function clearCart(): Promise<void> {
   const userId = await getCurrentUserId();
+  const rows = await fetchCartRows(userId);
   const supabase = getSupabaseClient();
   const { error } = await supabase
     .from("cart_items")
@@ -364,4 +383,5 @@ export async function clearCart(): Promise<void> {
     .eq("user_id", userId);
 
   if (error) throw createServiceError("Не удалось очистить корзину", error);
+  rows.forEach((row) => void logCartRemove(row.book_id));
 }

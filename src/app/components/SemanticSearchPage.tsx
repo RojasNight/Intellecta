@@ -1,8 +1,9 @@
 import { ArrowLeft, Search, Sparkles, Wand2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { BRAND } from "./brand";
 import { searchCatalogBooks } from "../../services/catalogService";
+import { logSearch } from "../../services/userEventService";
 import { useAppContext } from "./Root";
 import type { Book } from "./types";
 import {
@@ -65,6 +66,7 @@ export function SemanticSearchPage() {
   const [draft, setDraft] = useState(query);
   const [loading, setLoading] = useState(true);
   const [catalogBooks, setCatalogBooks] = useState<Book[]>([]);
+  const lastLoggedQueryRef = useRef("");
 
   useEffect(() => {
     if (searchQuery && !searchParams.get("q")) {
@@ -73,6 +75,12 @@ export function SemanticSearchPage() {
   }, [searchQuery, searchParams, setSearchParams]);
 
   useEffect(() => {
+    const trimmedQuery = query.trim();
+    if (trimmedQuery && trimmedQuery !== lastLoggedQueryRef.current) {
+      lastLoggedQueryRef.current = trimmedQuery;
+      void logSearch(trimmedQuery);
+    }
+
     let cancelled = false;
     setLoading(true);
     searchCatalogBooks({ q: query, limit: 40 })

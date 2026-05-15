@@ -773,3 +773,88 @@ Stage 16 реализует безопасное оформление заказ
 
 - User events не пишутся при оформлении заказа до Stage 18.
 - Рекомендации пока не используют историю заказов до Stage 19.
+
+## Stage 18 — User events
+
+Stage 18 добавляет безопасное логирование минимальных пользовательских событий в `public.user_events` для будущих рекомендаций и аналитики. Это не реализация Recommendations и не semantic search: текущий слой только пишет события.
+
+### Таблица `public.user_events`
+
+Поля:
+
+- `id` — UUID primary key.
+- `user_id` — UUID профиля или `null` для гостя.
+- `book_id` — UUID книги, если событие связано с книгой.
+- `event_type` — одно из: `book_view`, `search`, `favorite_add`, `favorite_remove`, `cart_add`, `cart_remove`, `purchase`, `recommendation_click`.
+- `event_payload` — минимальный `jsonb` payload.
+- `created_at` — время события.
+
+Payload намеренно ограничен техническими полями события: `book_id`, `quantity`, `query`, `order_id`, `recommendation_id`. В payload нельзя писать email, телефон, адрес, JWT/session, checkout contact или другие лишние персональные данные.
+
+### Frontend service
+
+Создан `src/services/userEventService.ts`:
+
+- `logBookView(bookId)`
+- `logSearch(query)`
+- `logFavoriteAdd(bookId)`
+- `logFavoriteRemove(bookId)`
+- `logCartAdd(bookId, quantity)`
+- `logCartRemove(bookId)`
+- `logPurchase(orderId)`
+- `logRecommendationClick(bookId, recommendationId)`
+
+Сервис берет текущую Supabase session. Если пользователь авторизован, пишет `user_id = session.user.id`; если сессии нет, пишет `user_id = null`. Ошибки логирования не показываются пользователю и выводятся только в dev console.
+
+### Где события пишутся
+
+- `/book/:id` — `book_view` при успешной загрузке карточки книги.
+- `/catalog` и `/search` — `search` при явном поисковом запросе.
+- `favoritesService` — `favorite_add` и `favorite_remove` после успешного изменения избранного.
+- `cartService` — `cart_add` и `cart_remove` после успешного изменения корзины.
+- `orderService.createOrderFromCart` — `purchase` после успешного RPC-заказа.
+- `RecommendationsPage` и блок похожих книг на карточке — `recommendation_click` при открытии рекомендованной книги.
+
+### SQL/RLS
+
+Перед проверкой выполните в Supabase SQL Editor:
+
+```sql
+-- supabase/sql/21_user_events_rls.sql
+```
+
+Скрипт:
+
+- включает RLS для `public.user_events`;
+- нормализует старый `event_type = 'view'` в `book_view`;
+- обновляет check constraint для Stage 18 event types;
+- разрешает authenticated user вставлять только свои события: `user_id = auth.uid()`;
+- разрешает guest/anon вставлять только события с `user_id is null`;
+- разрешает authenticated user читать только свои события;
+- запрещает browser roles выполнять update/delete;
+- ограничивает размер `event_payload`.
+
+### Проверка Stage 18
+
+1. Гость открывает карточку книги или выполняет поиск: появляется событие с `user_id = null`.
+2. Авторизованный пользователь открывает карточку: появляется `book_view` с `user_id` и `book_id`.
+3. Добавление/удаление избранного пишет `favorite_add` / `favorite_remove`.
+4. Добавление/удаление корзины пишет `cart_add` / `cart_remove`.
+5. Оформление заказа пишет `purchase` с `order_id`.
+6. Клик по рекомендованной/похожей книге пишет `recommendation_click`.
+7. Другой пользователь не видит чужие события.
+8. Анонимный клиент не может читать события.
+9. Попытки UPDATE/DELETE из frontend должны быть отклонены.
+
+```sql
+select id, user_id, book_id, event_type, event_payload, created_at
+from public.user_events
+order by created_at desc
+limit 50;
+```
+
+### Ограничения после Stage 18
+
+- Recommendations еще не используют `user_events`; это Stage 19.
+- Semantic search / pgvector не изменялись; это Stage 20.
+- Логирование выполняется direct insert через Supabase anon client + RLS, без service role key во frontend.

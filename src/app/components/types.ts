@@ -125,6 +125,32 @@ export interface UpdateCartQuantityInput {
   quantity: number;
 }
 
+
+export type UserEventType =
+  | "book_view"
+  | "search"
+  | "favorite_add"
+  | "favorite_remove"
+  | "cart_add"
+  | "cart_remove"
+  | "purchase"
+  | "recommendation_click";
+
+export interface UserEventRow {
+  id: string;
+  user_id?: string | null;
+  book_id?: string;
+  event_type: UserEventType;
+  event_payload?: Record<string, unknown>;
+  created_at?: string;
+}
+
+export interface UserEventState {
+  events: UserEventRow[];
+  loading: boolean;
+  error: string | null;
+}
+
 export interface RecommendationItem {
   bookId: string;
   score: number;

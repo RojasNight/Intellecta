@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "../lib/supabase";
 import { mapCatalogRowToBook, type CatalogViewRow } from "./catalogService";
 import type { Book, FavoriteBook, FavoriteRow } from "../app/components/types";
+import { logFavoriteAdd, logFavoriteRemove } from "./userEventService";
 
 export type AddFavoriteInput = { bookId: string };
 export type RemoveFavoriteInput = { bookId: string };
@@ -133,6 +134,8 @@ export async function addFavorite(bookId: string): Promise<FavoriteRow> {
     throw createServiceError("Не удалось добавить книгу в избранное", error);
   }
 
+  void logFavoriteAdd(bookId);
+
   const normalized = normalizeFavoriteRow(data);
   if (!normalized) {
     throw createServiceError("Supabase вернул некорректную запись избранного");
@@ -158,6 +161,8 @@ export async function removeFavorite(bookId: string): Promise<void> {
   if (error) {
     throw createServiceError("Не удалось удалить книгу из избранного", error);
   }
+
+  void logFavoriteRemove(bookId);
 }
 
 export async function isFavorite(bookId: string): Promise<boolean> {

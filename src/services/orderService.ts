@@ -6,6 +6,7 @@ import type {
   OrderStatus,
   OrderWithItems,
 } from "../app/components/types";
+import { logPurchase } from "./userEventService";
 
 export type DeliveryType = "pickup" | "courier" | "digital";
 
@@ -230,6 +231,7 @@ export async function createOrderFromCart(
   if (!order) throw createServiceError("Supabase вернул некорректные данные заказа");
 
   const items = await fetchOrderItems([order.id]);
+  void logPurchase(order.id);
   return { ...order, items };
 }
 

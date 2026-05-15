@@ -47,6 +47,7 @@
 20. `18_cart_items_rls.sql` — сужает RLS для `public.cart_items` до owner-only доступа: `user_id = auth.uid()` для select/insert/update/delete и проверяет constraints корзины.
 21. `19_orders_rpc_rls.sql` — Stage 16: RLS для `orders`/`order_items`, RPC `create_order_from_cart(...)` и `admin_update_order_status(...)`.
 22. `20_ai_analysis_lifecycle.sql` — Stage 17: RLS/status baseline для `book_ai_profiles` и `ai_analysis_jobs`, read-only browser access, stale/running/ready/failed statuses.
+23. `21_user_events_rls.sql` — Stage 18: нормализация `book_view`, RLS для `user_events`, guest insert с `user_id is null`, запрет update/delete.
 
 ## Важные правила
 
@@ -190,3 +191,29 @@ order by created_at desc;
 ```
 
 Важно: browser frontend использует только anon key и admin session token. `SUPABASE_SERVICE_ROLE_KEY` используется только в Vercel Serverless Function `/api/analyze-book` и не должен иметь prefix `VITE_` или `NEXT_PUBLIC_`.
+
+
+## Stage 18 проверки
+
+После запуска `21_user_events_rls.sql` проверьте через приложение:
+
+1. Гость открывает карточку книги или выполняет поиск — в `public.user_events` создается событие с `user_id = null`.
+2. Авторизованный пользователь открывает карточку книги — создается `book_view` с `user_id = auth.uid()` и `book_id`.
+3. Добавление/удаление избранного создает `favorite_add` / `favorite_remove`.
+4. Добавление/удаление корзины создает `cart_add` / `cart_remove`; payload содержит только `book_id` и при добавлении `quantity`.
+5. Оформление заказа через RPC создает `purchase` с `order_id`.
+6. Клик по карточке рекомендации создает `recommendation_click` с `book_id` и `recommendation_id`.
+7. Другой authenticated user не видит события первого пользователя.
+8. Анонимный клиент не может читать `user_events`.
+9. UPDATE/DELETE для browser roles должны быть запрещены.
+
+Для ручной SQL-проверки структуры:
+
+```sql
+select id, user_id, book_id, event_type, event_payload, created_at
+from public.user_events
+order by created_at desc
+limit 50;
+```
+
+Важно: `event_payload` предназначен только для минимальных технических полей события. Email, телефон, адрес, токены, полный checkout contact и другие PII туда не пишутся.

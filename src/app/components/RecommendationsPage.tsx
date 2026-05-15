@@ -5,6 +5,7 @@ import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { BRAND } from "./brand";
 import { BOOKS, GOALS, RECOMMENDATIONS, TOPICS } from "./data";
 import { useAppContext } from "./Root";
+import { logRecommendationClick } from "../../services/userEventService";
 import type { Book, Complexity } from "./types";
 import { GhostButton, Notice, PrimaryButton, SectionTitle, SemanticBadge, ScoreBadge, BookCard } from "./shared";
 
@@ -38,6 +39,11 @@ export function RecommendationsPage() {
     "подходит для знакомства с темой",
     `высокая оценка читателей · ${b.rating.toFixed(1)}`,
   ];
+
+  const openRecommendation = (book: Book, recommendationId: string) => {
+    void logRecommendationClick(book.id, recommendationId);
+    navigate(`/book/${book.slug || book.id}`);
+  };
 
   return (
     <main className="max-w-[1100px] mx-auto px-4 md:px-8 py-8 md:py-10 fade-in">
@@ -165,7 +171,7 @@ export function RecommendationsPage() {
                 style={{ background: "white", borderColor: BRAND.beige, boxShadow: "0 1px 3px rgba(26,43,60,0.04)" }}
               >
                 <button
-                  onClick={() => navigate(`/book/${book.id}`)}
+                  onClick={() => openRecommendation(book, `personal:${rec.bookId}`)}
                   className="rounded-md overflow-hidden mx-auto sm:mx-0"
                   style={{ width: 120, height: 170, background: BRAND.beige }}
                   aria-label={`Открыть «${book.title}»`}
@@ -175,7 +181,7 @@ export function RecommendationsPage() {
                 <div>
                   <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div>
-                      <button onClick={() => navigate(`/book/${book.id}`)} className="text-left">
+                      <button onClick={() => openRecommendation(book, `personal:${rec.bookId}`)} className="text-left">
                         <h3 className="font-serif" style={{ color: BRAND.navy, fontSize: 20, lineHeight: 1.2 }}>
                           {book.title}
                         </h3>
@@ -215,7 +221,7 @@ export function RecommendationsPage() {
                       <Heart size={14} fill={favorites.includes(book.id) ? BRAND.navy : "none"} />
                       {favorites.includes(book.id) ? "В избранном" : "В избранное"}
                     </GhostButton>
-                    <GhostButton onClick={() => navigate(`/book/${book.id}`)}>Подробнее</GhostButton>
+                    <GhostButton onClick={() => openRecommendation(book, `personal:${rec.bookId}`)}>Подробнее</GhostButton>
                   </div>
                 </div>
               </article>
@@ -238,7 +244,7 @@ export function RecommendationsPage() {
               cartDisabled={cartPendingBookIds.includes(b.id)}
               onToggleFav={() => toggleFav(b.id)}
               onAddToCart={() => addToCart(b.id)}
-              onOpen={() => navigate(`/book/${b.id}`)}
+              onOpen={() => openRecommendation(b, `popular:${b.id}`)}
               reasons={!hasPrefs ? popularReasons(b) : undefined}
             />
           ))}

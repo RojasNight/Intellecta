@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { BRAND } from "./brand";
 import { getCatalogBooks } from "../../services/catalogService";
+import { logSearch } from "../../services/userEventService";
 import { useAppContext } from "./Root";
 import type { Complexity } from "./types";
 import { BookCard, Breadcrumbs, EmptyState, SkeletonCard } from "./shared";
@@ -204,7 +205,11 @@ export function CatalogPage() {
       </div>
 
       <form
-        onSubmit={(e) => { e.preventDefault(); triggerLoading(); }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          triggerLoading();
+          if (q.trim()) void logSearch(q);
+        }}
         className="mb-5" role="search"
       >
         <label htmlFor="cat-search" className="sr-only">Поиск по каталогу</label>
@@ -228,7 +233,7 @@ export function CatalogPage() {
         {q.trim().length > 3 && (
           <div className="mt-2 inline-flex items-center gap-2" style={{ color: BRAND.slate, fontSize: 13 }}>
             <Sparkles size={14} />
-            <button onClick={() => { setSearchQuery(q); navigate("/search"); }} type="button" style={{ color: BRAND.navy }}>
+            <button onClick={() => { setSearchQuery(q); void logSearch(q); navigate("/search"); }} type="button" style={{ color: BRAND.navy }}>
               Найти «{q}» по смыслу →
             </button>
           </div>
