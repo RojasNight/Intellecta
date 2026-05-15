@@ -18,7 +18,7 @@
 
 ## Current stage/status
 
-Текущий этап: **Stage 17 — реальный AI-analysis lifecycle**.
+Текущий этап: **Stage 19 — персональные рекомендации на основе Supabase**.
 
 Готово на предыдущих этапах:
 
@@ -88,11 +88,11 @@
 - Если `OPENROUTER_API_KEY` не задан или OpenRouter недоступен, используется серверный MVP fallback-анализ: summary из описания, темы/keywords из жанров и текста, complexity/tone по эвристикам, embedding = `null`.
 - RLS для `book_ai_profiles` и `ai_analysis_jobs` переведен в read-only режим для browser clients; прямые insert/update/delete из frontend запрещены.
 
-Пока не переносится в рамках Stage 17:
+Пока не переносится в рамках Stage 19:
 
-- Полноценные рекомендации из Supabase.
-- User events.
-- pgvector/semantic search.
+- Semantic Search / pgvector.
+- Отдельная server-side RPC/Edge Function для рекомендаций; MVP scoring выполняется во frontend service через Supabase anon key и RLS.
+- Checkout RPC не изменяется.
 
 ## Local development in VS Code
 
@@ -296,6 +296,7 @@ SQL-скрипты находятся в `supabase/sql/` и применяютс
 20. `18_cart_items_rls.sql` — Stage 15 own-only RLS и integrity baseline для `public.cart_items`.
 21. `19_orders_rpc_rls.sql` — Stage 16 RLS для заказов, RPC оформления заказа и admin RPC смены статуса.
 22. `20_ai_analysis_lifecycle.sql` — Stage 17 RLS/status baseline для `book_ai_profiles` и `ai_analysis_jobs`.
+23. `21_user_events_rls.sql` — Stage 18 own-only RLS и payload constraints для `public.user_events`.
 
 В папке есть два файла с номером `08_`. На Stage 11 SQL-логику не меняем и файлы не переименовываем, чтобы не ломать существующие ссылки. Порядок выше фиксирует безопасную последовательность запуска.
 
@@ -721,11 +722,130 @@ order by updated_at desc;
 - Recommendations еще не используют AI-профили до Stage 19.
 - Semantic search/pgvector остается Stage 20.
 
+
+## Stage 19 — Recommendations на основе Supabase
+
+Stage 19 заменяет mock-рекомендации на runtime scoring по реальным данным Supabase. Фронтенд использует только публичный Supabase anon key, текущую auth session и RLS. Service role key, OpenRouter key и другие server-side secrets во frontend не используются.
+
+### Используемые таблицы и view
+
+- `public.book_catalog_view` — активный каталог, авторы, жанры, цены, рейтинг и поля AI-профиля, доступные пользователю.
+- `public.book_ai_profiles` — best-effort чтение `summary`, `topics`, `keywords`, `complexity_level`, `emotional_tone`; если RLS ограничивает прямое чтение, сервис использует AI-поля из `book_catalog_view`.
+- `public.user_preferences` — жанры, темы, цели чтения, диапазон сложности и `excluded_genres`.
+- `public.favorites` — книги, добавленные пользователем в избранное.
+- `public.cart_items` — книги в текущей корзине; они исключаются из выдачи рекомендаций.
+- `public.orders` и `public.order_items` — купленные книги; они исключаются из выдачи, но используются как сигнал похожести для других книг.
+- `public.user_events` — `book_view`, `search`, `favorite_add`, `favorite_remove`, `cart_add`, `cart_remove`, `purchase`, `recommendation_click`.
+
+### Frontend service
+
+Создан `src/services/recommendationService.ts`:
+
+- `getRecommendations(limit = 5)` — возвращает `RecommendationItem[]`, где каждый item содержит `book`, `score` от 0 до 1 и `reasons[]`.
+- `getRecommendationDetails(bookId)` — возвращает recommendation item для карточки/деталей, если книга присутствует в текущей подборке.
+
+Типы:
+
+```ts
+export interface RecommendationItem {
+  book: Book;
+  score: number;
+  reasons: string[];
+}
+
+export interface RecommendationState {
+  items: RecommendationItem[];
+  loading: boolean;
+  error: string | null;
+}
+```
+
+### MVP scoring без pgvector
+
+Алгоритм объяснимый и детерминированный. Для каждой активной книги считается суммарный score:
+
+- совпадение тем пользователя с `book_ai_profiles.topics` / `ai_keywords`;
+- совпадение жанров пользователя с жанрами книги;
+- соответствие целям чтения по токенам в title, description, genres, topics, keywords и summary;
+- попадание уровня сложности книги в диапазон `complexity_min`–`complexity_max`;
+- похожесть на книги из избранного по пересечению жанров, тем, keywords и summary-токенов;
+- похожесть на ранее купленные книги;
+- похожесть на недавно просмотренные книги и клики по рекомендациям из `user_events`;
+- совпадение с недавними поисковыми запросами;
+- небольшой вес рейтинга.
+
+Фильтры перед выдачей:
+
+- неактивные книги не показываются;
+- книги из `excluded_genres` не показываются;
+- книги из текущей корзины не показываются;
+- уже купленные книги не показываются.
+
+Если персональных сигналов мало, сервис добирает выдачу популярными активными книгами, чтобы пользователь видел минимум 5 рекомендаций при достаточном размере каталога.
+
+### Примеры reasons
+
+- `совпадает тема: личностный рост`;
+- `совпадает жанр: Бизнес`;
+- `подходит уровень сложности`;
+- `соответствует цели чтения: профессиональное развитие`;
+- `похожа на книги из избранного`;
+- `похожа на ранее купленные книги`;
+- `основано на недавно просмотренных книгах`;
+- `учитывает ваши недавние поисковые запросы`;
+- `высокая оценка читателей · 4.7`.
+
+### UI `/recommendations`
+
+Страница `/recommendations` теперь загружает данные через `recommendationService`, а не через mock `RECOMMENDATIONS`.
+
+Реализовано:
+
+- loading state со skeleton rows;
+- error state с повторной загрузкой;
+- empty state «Рекомендаций пока нет»;
+- гостевой режим с неперсональными популярными книгами;
+- CTA на заполнение `/preferences`, если профиль пустой;
+- отображение `ScoreBadge`;
+- список `reasons[]` на каждой карточке;
+- обновление после изменения preferences, favorites или cart state;
+- `recommendation_click` логируется при открытии рекомендованной книги.
+
+### RLS и безопасность
+
+Stage 19 не добавляет INSERT/UPDATE для рекомендаций: подборка генерируется в runtime. Защита обеспечивается существующими RLS-политиками:
+
+- пользователь читает только свои `user_preferences`;
+- пользователь читает только свои `favorites`;
+- пользователь читает только свою `cart_items`;
+- пользователь читает только свои `orders` и `order_items`;
+- пользователь читает только свои `user_events`;
+- публичный каталог доступен только для активных книг через `book_catalog_view`;
+- service role key не попадает во frontend.
+
+### Проверка Stage 19 вручную
+
+1. Выполнить SQL-скрипты до `21_user_events_rls.sql` включительно.
+2. Войти пользователем A.
+3. Заполнить `/preferences`: genres, topics, goals, complexity range, excluded genres.
+4. Добавить несколько книг в избранное.
+5. Открыть несколько карточек книг, выполнить поиск, добавить книгу в корзину.
+6. Оформить заказ, чтобы появились `orders`, `order_items` и `purchase`.
+7. Открыть `/recommendations`.
+8. Проверить, что каждая рекомендация содержит `score` и `reasons[]`.
+9. Проверить, что книги из `excluded_genres`, корзины и уже купленные книги не отображаются.
+10. Проверить гостевой режим: выйти из аккаунта и открыть `/recommendations` — должны отображаться неперсональные популярные книги или empty state, если каталог пуст.
+11. Выполнить `npm run build` и проверить Vercel deploy.
+
+### Что подготовлено для Stage 20
+
+`recommendationService` уже централизует загрузку `book_catalog_view`, `book_ai_profiles`, preferences, favorites, orders и `user_events`. На Stage 20 можно заменить часть scoring на RPC/Edge Function с pgvector similarity, не переписывая UI `/recommendations`: контракт `RecommendationItem { book, score, reasons }` остается тем же.
+
 ## Next stages backlog
 
-- Stage 18: User Events.
-- Stage 19: Recommendations на основе preferences, favorites, cart/orders и AI-профилей.
 - Stage 20: Semantic search / pgvector.
+- Stage 21: AI jobs journal.
+- Stage 24: финальный security audit.
 
 
 ## Stage 16 — Orders RPC

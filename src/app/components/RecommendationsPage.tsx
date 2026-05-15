@@ -1,65 +1,123 @@
-import { ChevronRight, Heart, ShoppingCart, Sparkles, Wand2, Settings2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ChevronRight, Heart, RefreshCcw, Settings2, ShoppingCart, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { BRAND } from "./brand";
-import { BOOKS, GOALS, RECOMMENDATIONS, TOPICS } from "./data";
 import { useAppContext } from "./Root";
+import { useAuth } from "../auth/AuthContext";
+import { getRecommendations } from "../../services/recommendationService";
 import { logRecommendationClick } from "../../services/userEventService";
-import type { Book, Complexity } from "./types";
-import { GhostButton, Notice, PrimaryButton, SectionTitle, SemanticBadge, ScoreBadge, BookCard } from "./shared";
+import type { Book, RecommendationItem } from "./types";
+import {
+  EmptyState,
+  GhostButton,
+  Notice,
+  PrimaryButton,
+  ScoreBadge,
+  SectionTitle,
+  SemanticBadge,
+  SkeletonRow,
+} from "./shared";
 
-const COMPLEXITIES: Complexity[] = ["Лёгкий", "Средний", "Сложный", "Профессиональный"];
+const RECOMMENDATION_LIMIT = 8;
 
 export function RecommendationsPage() {
   const navigate = useNavigate();
-  const { preferences, toggleFav, favorites, favoritePendingIds, cartPendingBookIds, addToCart, aiAvailable } = useAppContext();
-  const hasPrefs = !!preferences && (preferences.genres.length > 0 || preferences.topics.length > 0);
+  const {
+    preferences,
+    toggleFav,
+    favorites,
+    favoritePendingIds,
+    cart,
+    cartPendingBookIds,
+    addToCart,
+    aiAvailable,
+  } = useAppContext();
+  const { isAuthenticated, loading: authLoading } = useAuth();
+  const [items, setItems] = useState<RecommendationItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [quickTopics, setQuickTopics] = useState<string[]>([]);
-  const [quickGoal, setQuickGoal] = useState<string>(GOALS[0]);
-  const [quickComplexity, setQuickComplexity] = useState<Complexity>("Средний");
-  const [showQuick, setShowQuick] = useState(false);
+  const hasPrefs = Boolean(preferences && (
+    preferences.genres.length > 0 ||
+    preferences.topics.length > 0 ||
+    preferences.goals.length > 0 ||
+    preferences.excludedGenres.length > 0 ||
+    preferences.complexityMin !== 1 ||
+    preferences.complexityMax !== 5
+  ));
 
-  const personalized = useMemo(() => {
-    if (!hasPrefs && quickTopics.length === 0) return null;
-    return RECOMMENDATIONS.map((r) => ({
-      rec: r,
-      book: BOOKS.find((b) => b.id === r.bookId)!,
-    })).filter((x) => !!x.book && x.book.isActive);
-  }, [hasPrefs, quickTopics]);
-
-  const popular = useMemo(
-    () => BOOKS.filter((b) => b.isActive && b.rating >= 4.4).slice(0, 4),
-    []
+  const cartBookIds = useMemo(
+    () => cart.map((item) => item.bookId).sort().join(","),
+    [cart],
+  );
+  const favoriteBookIds = useMemo(
+    () => [...favorites].sort().join(","),
+    [favorites],
+  );
+  const preferencesKey = useMemo(
+    () => preferences ? JSON.stringify(preferences) : "no-preferences",
+    [preferences],
   );
 
-  const popularReasons = (b: Book) => [
-    "часто выбирают для саморазвития",
-    "подходит для знакомства с темой",
-    `высокая оценка читателей · ${b.rating.toFixed(1)}`,
-  ];
+  const loadRecommendations = useCallback(async () => {
+    if (authLoading) return;
 
-  const openRecommendation = (book: Book, recommendationId: string) => {
-    void logRecommendationClick(book.id, recommendationId);
+    setLoading(true);
+    setError(null);
+
+    try {
+      const nextItems = await getRecommendations(RECOMMENDATION_LIMIT);
+      setItems(nextItems);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Не удалось сформировать рекомендации";
+      setError(message);
+      setItems([]);
+      if (import.meta.env.DEV) {
+        console.error("[Интеллекта][recommendations] load:error", { message });
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [authLoading]);
+
+  useEffect(() => {
+    void loadRecommendations();
+  }, [loadRecommendations, favoriteBookIds, cartBookIds, preferencesKey, isAuthenticated]);
+
+  const openRecommendation = (book: Book, index: number) => {
+    void logRecommendationClick(book.id, `stage19:${index + 1}:${Math.round((items[index]?.score ?? 0) * 100)}`);
     navigate(`/book/${book.slug || book.id}`);
   };
 
   return (
     <main className="max-w-[1100px] mx-auto px-4 md:px-8 py-8 md:py-10 fade-in">
-      <SectionTitle sub="Подборка строится по вашим предпочтениям, избранному, просмотрам и покупкам — мы объясняем каждый выбор.">
-        Персональные рекомендации
-      </SectionTitle>
+      <div className="flex items-start justify-between gap-4 flex-wrap mb-2">
+        <SectionTitle sub="Подборка строится по профилю, избранному, корзине, заказам, событиям пользователя и ИИ-признакам книг.">
+          Персональные рекомендации
+        </SectionTitle>
+        <GhostButton onClick={loadRecommendations} disabled={loading}>
+          <RefreshCcw size={16} /> Обновить
+        </GhostButton>
+      </div>
 
       {!aiAvailable && (
         <div className="mb-5">
-          <Notice tone="warn" title="ИИ-рекомендации временно недоступны">
-            Показаны популярные книги по вашим жанрам. Полный режим вернётся автоматически.
+          <Notice tone="warn" title="ИИ-профили временно недоступны">
+            Используем жанры, рейтинг и доступные данные каталога. После восстановления ИИ-профилей рекомендации станут точнее.
           </Notice>
         </div>
       )}
 
-      {!hasPrefs && (
+      {!isAuthenticated && !authLoading && (
+        <div className="mb-6">
+          <Notice tone="info" title="Гостевой режим">
+            Сейчас показаны неперсональные популярные книги. Войдите и заполните профиль, чтобы получить рекомендации по вашим темам, избранному и истории действий.
+          </Notice>
+        </div>
+      )}
+
+      {isAuthenticated && !hasPrefs && !loading && (
         <section
           className="rounded-2xl border p-6 md:p-8 mb-8"
           style={{
@@ -78,187 +136,166 @@ export function RecommendationsPage() {
             </div>
             <div className="flex-1 min-w-[220px]">
               <h2 className="font-serif" style={{ color: BRAND.navy, fontSize: 24, lineHeight: 1.2 }}>
-                Настройте рекомендации за 2 минуты
+                Заполните профиль для более точной подборки
               </h2>
               <p style={{ color: BRAND.slate, marginTop: 6, lineHeight: 1.6 }}>
-                Ответьте на несколько вопросов, и мы подберём книги по вашим
-                темам, целям и уровню сложности.
+                Даже без профиля мы учитываем избранное, корзину, заказы и события, но темы и цели чтения дают лучшие explanations.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <PrimaryButton onClick={() => navigate("/preferences")}>
                   <Settings2 size={16} /> Заполнить предпочтения
                 </PrimaryButton>
-                <GhostButton onClick={() => setShowQuick((s) => !s)}>
-                  <Wand2 size={16} /> Быстрая настройка
-                </GhostButton>
-                <GhostButton onClick={() => navigate("/catalog")}>Показать популярные книги</GhostButton>
+                <GhostButton onClick={() => navigate("/catalog")}>Вернуться в каталог</GhostButton>
               </div>
             </div>
           </div>
-
-          {showQuick && (
-            <div className="mt-6 grid gap-4 md:grid-cols-3">
-              <QuickField label="Темы (1–3)">
-                <div className="flex flex-wrap gap-1.5">
-                  {TOPICS.slice(0, 8).map((t) => {
-                    const active = quickTopics.includes(t);
-                    return (
-                      <button
-                        key={t}
-                        onClick={() => setQuickTopics((s) =>
-                          s.includes(t)
-                            ? s.filter((x) => x !== t)
-                            : s.length >= 3 ? s : [...s, t]
-                        )}
-                        aria-pressed={active}
-                        className="rounded-full"
-                        style={{
-                          padding: "4px 10px", fontSize: 12,
-                          background: active ? BRAND.navy : "white",
-                          color: active ? "white" : BRAND.charcoal,
-                          border: `1px solid ${active ? BRAND.navy : BRAND.lightGray}`,
-                        }}
-                      >{t}</button>
-                    );
-                  })}
-                </div>
-              </QuickField>
-              <QuickField label="Цель чтения">
-                <select
-                  value={quickGoal}
-                  onChange={(e) => setQuickGoal(e.target.value)}
-                  className="w-full rounded-md border px-3 py-2 bg-white"
-                  style={{ borderColor: BRAND.lightGray }}
-                  aria-label="Цель чтения"
-                >
-                  {GOALS.map((g) => <option key={g}>{g}</option>)}
-                </select>
-              </QuickField>
-              <QuickField label="Уровень сложности">
-                <select
-                  value={quickComplexity}
-                  onChange={(e) => setQuickComplexity(e.target.value as Complexity)}
-                  className="w-full rounded-md border px-3 py-2 bg-white"
-                  style={{ borderColor: BRAND.lightGray }}
-                  aria-label="Уровень сложности"
-                >
-                  {COMPLEXITIES.map((c) => <option key={c}>{c}</option>)}
-                </select>
-              </QuickField>
-              <div className="md:col-span-3">
-                <PrimaryButton
-                  onClick={() => { /* applies via personalized memo */ }}
-                  disabled={quickTopics.length === 0}
-                >
-                  Получить быстрые рекомендации
-                </PrimaryButton>
-              </div>
-            </div>
-          )}
         </section>
       )}
 
-      {personalized && personalized.length > 0 && (
+      {loading && (
+        <section className="space-y-4" aria-busy="true" aria-live="polite">
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+        </section>
+      )}
+
+      {!loading && error && (
+        <EmptyState
+          title="Не удалось сформировать рекомендации"
+          text={error}
+          icon={<Sparkles size={22} />}
+          action={(
+            <>
+              <PrimaryButton onClick={loadRecommendations}>Повторить</PrimaryButton>
+              <GhostButton onClick={() => navigate("/catalog")}>Открыть каталог</GhostButton>
+            </>
+          )}
+        />
+      )}
+
+      {!loading && !error && items.length === 0 && (
+        <EmptyState
+          title="Рекомендаций пока нет"
+          text="Добавьте книги в избранное, заполните предпочтения или посмотрите несколько карточек — после этого подборка станет доступна."
+          icon={<Sparkles size={22} />}
+          action={(
+            <>
+              <PrimaryButton onClick={() => navigate("/preferences")}>Заполнить предпочтения</PrimaryButton>
+              <GhostButton onClick={() => navigate("/catalog")}>Перейти в каталог</GhostButton>
+            </>
+          )}
+        />
+      )}
+
+      {!loading && !error && items.length > 0 && (
         <section className="mb-10">
-          <SectionTitle sub="С пояснениями, почему книга может вам подойти">
-            {hasPrefs ? "Подобрано для вас" : "Подобрано по быстрой настройке"}
+          <SectionTitle sub="Каждая карточка содержит score и причины, по которым книга попала в подборку.">
+            {isAuthenticated ? "Подобрано для вас" : "Популярное для начала"}
           </SectionTitle>
           <div className="space-y-4">
-            {personalized.map(({ rec, book }) => (
-              <article
-                key={book.id}
-                className="rounded-xl border p-4 md:p-5 grid gap-4 sm:grid-cols-[120px_1fr]"
-                style={{ background: "white", borderColor: BRAND.beige, boxShadow: "0 1px 3px rgba(26,43,60,0.04)" }}
-              >
-                <button
-                  onClick={() => openRecommendation(book, `personal:${rec.bookId}`)}
-                  className="rounded-md overflow-hidden mx-auto sm:mx-0"
-                  style={{ width: 120, height: 170, background: BRAND.beige }}
-                  aria-label={`Открыть «${book.title}»`}
-                >
-                  <ImageWithFallback src={book.coverUrl} alt={`Обложка книги «${book.title}»`} className="w-full h-full object-cover" />
-                </button>
-                <div>
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div>
-                      <button onClick={() => openRecommendation(book, `personal:${rec.bookId}`)} className="text-left">
-                        <h3 className="font-serif" style={{ color: BRAND.navy, fontSize: 20, lineHeight: 1.2 }}>
-                          {book.title}
-                        </h3>
-                        <div style={{ color: BRAND.slate, fontSize: 14 }}>{book.authors.join(", ")}</div>
-                      </button>
-                    </div>
-                    <div className="text-right flex flex-col items-end gap-1">
-                      <ScoreBadge score={rec.score} />
-                      <div style={{ color: BRAND.charcoal }}>{book.price} ₽</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {book.topics.slice(0, 4).map((t) => (
-                      <SemanticBadge key={t}>{t}</SemanticBadge>
-                    ))}
-                  </div>
-
-                  <ul
-                    className="mt-3 grid gap-1"
-                    style={{ color: BRAND.charcoal, fontSize: 14 }}
-                    aria-label="Причины рекомендации"
-                  >
-                    {rec.reasons.map((r) => (
-                      <li key={r} className="flex items-start gap-2">
-                        <ChevronRight size={14} style={{ color: BRAND.slate, marginTop: 3, flexShrink: 0 }} />
-                        {r}
-                      </li>
-                    ))}
-                  </ul>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <PrimaryButton onClick={() => addToCart(book.id)} disabled={cartPendingBookIds.includes(book.id)}>
-                      <ShoppingCart size={14} /> В корзину
-                    </PrimaryButton>
-                    <GhostButton onClick={() => toggleFav(book.id)} disabled={favoritePendingIds.includes(book.id)}>
-                      <Heart size={14} fill={favorites.includes(book.id) ? BRAND.navy : "none"} />
-                      {favorites.includes(book.id) ? "В избранном" : "В избранное"}
-                    </GhostButton>
-                    <GhostButton onClick={() => openRecommendation(book, `personal:${rec.bookId}`)}>Подробнее</GhostButton>
-                  </div>
-                </div>
-              </article>
+            {items.map((item, index) => (
+              <RecommendationRow
+                key={item.book.id}
+                item={item}
+                index={index}
+                isFav={favorites.includes(item.book.id)}
+                favoriteDisabled={favoritePendingIds.includes(item.book.id)}
+                cartDisabled={cartPendingBookIds.includes(item.book.id)}
+                onOpen={() => openRecommendation(item.book, index)}
+                onToggleFav={() => toggleFav(item.book.id)}
+                onAddToCart={() => addToCart(item.book.id)}
+              />
             ))}
           </div>
         </section>
       )}
-
-      <section>
-        <SectionTitle sub="Если вы только присоединились — начните с этих изданий">
-          {hasPrefs ? "Может также понравиться" : "Популярные книги для начала"}
-        </SectionTitle>
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-4">
-          {popular.map((b) => (
-            <BookCard
-              key={b.id}
-              book={b}
-              isFav={favorites.includes(b.id)}
-              favoriteDisabled={favoritePendingIds.includes(b.id)}
-              cartDisabled={cartPendingBookIds.includes(b.id)}
-              onToggleFav={() => toggleFav(b.id)}
-              onAddToCart={() => addToCart(b.id)}
-              onOpen={() => openRecommendation(b, `popular:${b.id}`)}
-              reasons={!hasPrefs ? popularReasons(b) : undefined}
-            />
-          ))}
-        </div>
-      </section>
     </main>
   );
 }
 
-function QuickField({ label, children }: { label: string; children: React.ReactNode }) {
+function RecommendationRow({
+  item,
+  index,
+  isFav,
+  favoriteDisabled,
+  cartDisabled,
+  onOpen,
+  onToggleFav,
+  onAddToCart,
+}: {
+  item: RecommendationItem;
+  index: number;
+  isFav: boolean;
+  favoriteDisabled?: boolean;
+  cartDisabled?: boolean;
+  onOpen: () => void;
+  onToggleFav: () => void;
+  onAddToCart: () => void;
+}) {
+  const book = item.book;
+  const unavailable = !book.isActive || book.inStock <= 0;
+
   return (
-    <div>
-      <div style={{ color: BRAND.darkSlate, fontSize: 13, marginBottom: 6 }}>{label}</div>
-      {children}
-    </div>
+    <article
+      className="rounded-xl border p-4 md:p-5 grid gap-4 sm:grid-cols-[120px_1fr]"
+      style={{ background: "white", borderColor: BRAND.beige, boxShadow: "0 1px 3px rgba(26,43,60,0.04)" }}
+    >
+      <button
+        onClick={onOpen}
+        className="rounded-md overflow-hidden mx-auto sm:mx-0"
+        style={{ width: 120, height: 170, background: BRAND.beige }}
+        aria-label={`Открыть «${book.title}»`}
+      >
+        <ImageWithFallback src={book.coverUrl} alt={`Обложка книги «${book.title}»`} className="w-full h-full object-cover" />
+      </button>
+      <div>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <button onClick={onOpen} className="text-left">
+              <div style={{ color: BRAND.slate, fontSize: 12, marginBottom: 4 }}>#{index + 1} в подборке</div>
+              <h3 className="font-serif" style={{ color: BRAND.navy, fontSize: 20, lineHeight: 1.2 }}>
+                {book.title}
+              </h3>
+              <div style={{ color: BRAND.slate, fontSize: 14 }}>{book.authors.join(", ")}</div>
+            </button>
+          </div>
+          <div className="text-right flex flex-col items-end gap-1">
+            <ScoreBadge score={item.score} />
+            <div style={{ color: BRAND.charcoal }}>{book.price} ₽</div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {book.topics.slice(0, 4).map((topic) => (
+            <SemanticBadge key={topic}>{topic}</SemanticBadge>
+          ))}
+        </div>
+
+        <ul
+          className="mt-3 grid gap-1"
+          style={{ color: BRAND.charcoal, fontSize: 14 }}
+          aria-label="Причины рекомендации"
+        >
+          {item.reasons.map((reason) => (
+            <li key={reason} className="flex items-start gap-2">
+              <ChevronRight size={14} style={{ color: BRAND.slate, marginTop: 3, flexShrink: 0 }} />
+              {reason}
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <PrimaryButton onClick={onAddToCart} disabled={unavailable || cartDisabled}>
+            <ShoppingCart size={14} /> {unavailable ? "Недоступно" : "В корзину"}
+          </PrimaryButton>
+          <GhostButton onClick={onToggleFav} disabled={favoriteDisabled}>
+            <Heart size={14} fill={isFav ? BRAND.navy : "none"} />
+            {isFav ? "В избранном" : "В избранное"}
+          </GhostButton>
+          <GhostButton onClick={onOpen}>Подробнее</GhostButton>
+        </div>
+      </div>
+    </article>
   );
 }

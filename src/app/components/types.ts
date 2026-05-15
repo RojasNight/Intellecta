@@ -152,9 +152,15 @@ export interface UserEventState {
 }
 
 export interface RecommendationItem {
-  bookId: string;
+  book: Book;
   score: number;
   reasons: string[];
+}
+
+export interface RecommendationState {
+  items: RecommendationItem[];
+  loading: boolean;
+  error: string | null;
 }
 
 export interface User {

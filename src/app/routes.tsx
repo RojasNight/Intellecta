@@ -96,7 +96,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "recommendations",
-        element: <ProtectedRoute><RecommendationsPage /></ProtectedRoute>,
+        Component: RecommendationsPage,
       },
       {
         path: "favorites",
