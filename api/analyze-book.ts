@@ -1,8 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
+import { buildBookEmbeddingInput, createTextEmbedding, getEmbeddingConfig, toVectorLiteral } from "./_semantic";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 const MAX_PROVIDER_TEXT_LENGTH = 8000;
 const MAX_ERROR_LENGTH = 500;
 
@@ -340,44 +340,51 @@ async function callOpenRouterAnalysis(config, context) {
   }
 }
 
-function validateEmbedding(value) {
-  if (!Array.isArray(value)) return null;
-  const vector = value.map(Number);
-  if (!vector.length || vector.some((item) => !Number.isFinite(item))) return null;
-  return vector;
+function redactEmbeddingError(error) {
+  const raw = error instanceof Error ? error.message : String(error ?? "");
+  return redactSensitive(raw).slice(0, MAX_ERROR_LENGTH);
 }
 
 async function callOpenRouterEmbedding(config, profile, context) {
-  if (!config.openRouterApiKey || !config.openRouterEmbeddingModel) return null;
+  const embeddingConfig = {
+    ...getEmbeddingConfig(),
+    openRouterApiKey: config.openRouterApiKey || getEmbeddingConfig().openRouterApiKey,
+    appUrl: config.appUrl || getEmbeddingConfig().appUrl,
+  };
 
-  const input = [
-    context.book.title,
-    context.authors.join(", "),
-    context.genres.join(", "),
-    profile.summary,
-    profile.topics.join(", "),
-    profile.keywords.join(", "),
-  ].join("\n").slice(0, 6000);
+  const embeddingInput = buildBookEmbeddingInput(context.book, profile, context.authors, context.genres);
+  if (!embeddingInput) {
+    return {
+      embedding: null,
+      model: embeddingConfig.openRouterEmbeddingModel,
+      dimension: embeddingConfig.embeddingDimension,
+      status: "failed",
+      error: "Недостаточно текстовых данных для формирования embedding книги.",
+    };
+  }
 
   try {
-    const { response, jsonBody } = await fetchJsonWithTimeout(OPENROUTER_EMBEDDINGS_URL, {
-      method: "POST",
-      headers: openRouterHeaders(config),
-      body: JSON.stringify({
-        model: config.openRouterEmbeddingModel,
-        input,
-      }),
-    }, 20000);
+    const result = await createTextEmbedding(embeddingConfig, embeddingInput, {
+      dimension: embeddingConfig.embeddingDimension,
+      timeoutMs: 25000,
+    });
 
-    if (!response.ok) return null;
-    return validateEmbedding(jsonBody?.data?.[0]?.embedding);
-  } catch {
-    return null;
+    return {
+      embedding: result.embedding,
+      model: result.model,
+      dimension: result.dimension,
+      status: "ready",
+      error: null,
+    };
+  } catch (error) {
+    return {
+      embedding: null,
+      model: embeddingConfig.openRouterEmbeddingModel,
+      dimension: embeddingConfig.embeddingDimension,
+      status: "failed",
+      error: redactEmbeddingError(error),
+    };
   }
-}
-
-function toVectorLiteral(embedding) {
-  return `[${embedding.map((item) => Number(item).toString()).join(",")}]`;
 }
 
 async function upsertProfileWithEmbeddingRetry(supabase, profile) {
@@ -462,9 +469,11 @@ async function markJobFailed(supabase, jobId, errorMessage) {
 }
 
 function publicProfilePayload(profile) {
+  const { embedding, ...safeProfile } = profile;
   return {
-    ...profile,
-    embedding: Array.isArray(profile.embedding) ? profile.embedding : null,
+    ...safeProfile,
+    has_embedding: Boolean(embedding),
+    embedding: null,
   };
 }
 
@@ -528,7 +537,8 @@ export default async function handler(req, res) {
       .upsert({ book_id: bookId, status: "running", updated_at: new Date().toISOString() }, { onConflict: "book_id" });
 
     const { analysis, fallbackUsed } = await callOpenRouterAnalysis(config, context);
-    const embedding = fallbackUsed ? null : await callOpenRouterEmbedding(config, analysis, context);
+    const embeddingResult = await callOpenRouterEmbedding(config, analysis, context);
+    const nowIso = new Date().toISOString();
 
     const profilePayload = {
       book_id: bookId,
@@ -537,16 +547,27 @@ export default async function handler(req, res) {
       keywords: analysis.keywords,
       complexity_level: analysis.complexity_level,
       emotional_tone: analysis.emotional_tone,
-      embedding,
+      embedding: embeddingResult.embedding,
+      embedding_model: embeddingResult.model,
+      embedding_dimension: embeddingResult.dimension,
+      embedding_updated_at: embeddingResult.embedding ? nowIso : null,
+      embedding_status: embeddingResult.status,
+      embedding_error: embeddingResult.error,
       status: "ready",
-      updated_at: new Date().toISOString(),
+      updated_at: nowIso,
     };
 
     const savedProfile = await upsertProfileWithEmbeddingRetry(supabase, profilePayload);
 
     const { data: updatedJob, error: readyError } = await supabase
       .from("ai_analysis_jobs")
-      .update({ status: "ready", finished_at: new Date().toISOString(), error_message: null })
+      .update({
+        status: "ready",
+        finished_at: new Date().toISOString(),
+        error_message: embeddingResult.error
+          ? `ИИ-анализ выполнен, но embedding не получен: ${embeddingResult.error}`.slice(0, MAX_ERROR_LENGTH)
+          : null,
+      })
       .eq("id", jobId)
       .select("id, book_id, status, started_at, finished_at, error_message, created_at")
       .single();

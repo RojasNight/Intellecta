@@ -1,8 +1,9 @@
 import { ArrowLeft, Search, Sparkles, Wand2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { BRAND } from "./brand";
 import { searchCatalogBooks } from "../../services/catalogService";
+import { semanticSearchBooks, type SemanticSearchResult } from "../../services/semanticSearchService";
 import { logSearch } from "../../services/userEventService";
 import { useAppContext } from "./Root";
 import type { Book } from "./types";
@@ -11,68 +12,60 @@ import {
   Breadcrumbs,
   EmptyState,
   Notice,
-  SemanticBadge,
   SkeletonCard,
 } from "./shared";
 
-const QUERY_TOPICS: { match: RegExp; topics: string[] }[] = [
-  { match: /цифров|онлайн|сети|интернет|алгоритм/i, topics: ["цифровое общество", "идентичность"] },
-  { match: /самоопредел|выбор|личност|идент/i, topics: ["идентичность", "психология выбора", "выбор"] },
-  { match: /самораз|рост|осознан/i, topics: ["саморазвитие", "личностный рост"] },
-  { match: /ии|искусствен|нейросет/i, topics: ["искусственный интеллект", "этика"] },
-  { match: /лидер|команд|бизнес/i, topics: ["лидерство", "будущее работы"] },
-  { match: /мышл|когнит|память|внима/i, topics: ["познание", "критическое мышление"] },
-];
+type SearchMode = "semantic" | "text";
+type SearchListItem = {
+  book: Book;
+  score?: number;
+  matched: string[];
+  reasons?: string[];
+};
 
-function deriveQueryTopics(q: string): string[] {
-  if (!q.trim()) return [];
-  const found = new Set<string>();
-  QUERY_TOPICS.forEach((p) => {
-    if (p.match.test(q)) p.topics.forEach((t) => found.add(t));
-  });
-  return Array.from(found);
+function normalizeTopic(value: string) {
+  return value.toLowerCase().replace(/ё/g, "е").trim();
 }
 
-function scoreBook(book: Book, q: string, qTopics: string[]) {
-  let score = 0;
-  const matched: string[] = [];
-  qTopics.forEach((t) => {
-    if (book.topics.includes(t) || book.ai.topics.includes(t)) {
-      score += 0.28;
-      matched.push(t);
-    }
-  });
-  const ql = q.toLowerCase();
-  if (ql && book.title.toLowerCase().includes(ql)) score += 0.18;
-  if (ql && book.description.toLowerCase().includes(ql)) score += 0.08;
-  if (ql && book.authors.some((a) => a.toLowerCase().includes(ql))) score += 0.08;
-  if (ql) {
-    book.topics.forEach((t) => {
-      if (t.toLowerCase().includes(ql) && !matched.includes(t)) {
-        score += 0.12;
-        matched.push(t);
-      }
-    });
-  }
-  return { score: Math.min(0.99, score + (book.rating - 4) * 0.05), matched };
+function toTextList(books: Book[]): SearchListItem[] {
+  return books.map((book) => ({ book, matched: [], reasons: undefined }));
+}
+
+function toSemanticList(items: SemanticSearchResult[]): SearchListItem[] {
+  return items.map((item) => ({
+    book: item.book,
+    score: item.similarity,
+    matched: item.matchedTopics.length
+      ? item.matchedTopics
+      : item.book.topics.filter((topic) => item.reasons.some((reason) => normalizeTopic(reason).includes(normalizeTopic(topic)))).slice(0, 3),
+    reasons: item.reasons.length ? item.reasons : ["близко к запросу по смысловому описанию"],
+  }));
 }
 
 export function SemanticSearchPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { toggleFav, favorites, favoritePendingIds, cartPendingBookIds, addToCart, aiAvailable, searchQuery, setSearchQuery } = useAppContext();
+  const { toggleFav, favorites, favoritePendingIds, cartPendingBookIds, addToCart, searchQuery, setSearchQuery } = useAppContext();
 
   const query = searchParams.get("q") || searchQuery || "";
+  const initialMode = searchParams.get("mode") === "text" ? "text" : "semantic";
   const [draft, setDraft] = useState(query);
-  const [loading, setLoading] = useState(true);
-  const [catalogBooks, setCatalogBooks] = useState<Book[]>([]);
+  const [mode, setMode] = useState<SearchMode>(initialMode);
+  const [loading, setLoading] = useState(false);
+  const [list, setList] = useState<SearchListItem[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [fallbackUsed, setFallbackUsed] = useState(false);
   const lastLoggedQueryRef = useRef("");
 
   useEffect(() => {
     if (searchQuery && !searchParams.get("q")) {
-      setSearchParams({ q: searchQuery });
+      setSearchParams({ q: searchQuery, mode });
     }
-  }, [searchQuery, searchParams, setSearchParams]);
+  }, [searchQuery, searchParams, setSearchParams, mode]);
+
+  useEffect(() => {
+    setDraft(query);
+  }, [query]);
 
   useEffect(() => {
     const trimmedQuery = query.trim();
@@ -83,47 +76,71 @@ export function SemanticSearchPage() {
 
     let cancelled = false;
     setLoading(true);
-    searchCatalogBooks({ q: query, limit: 40 })
-      .then((books) => {
+    setNotice(null);
+    setFallbackUsed(false);
+
+    const run = async () => {
+      if (!trimmedQuery) {
+        const books = await searchCatalogBooks({ limit: 12 });
+        return { list: toTextList(books), notice: null, fallback: false };
+      }
+
+      if (mode === "text") {
+        const books = await searchCatalogBooks({ q: trimmedQuery, limit: 40 });
+        return { list: toTextList(books), notice: null, fallback: false };
+      }
+
+      try {
+        const response = await semanticSearchBooks({ query: trimmedQuery, limit: 40, minSimilarity: 0.35 });
+        return {
+          list: toSemanticList(response.items),
+          notice: response.message ?? null,
+          fallback: Boolean(response.fallback),
+        };
+      } catch (error) {
+        const books = await searchCatalogBooks({ q: trimmedQuery, limit: 40 });
+        const message = error instanceof Error ? error.message : "Смысловой поиск временно недоступен.";
+        return {
+          list: toTextList(books),
+          notice: `${message} Показаны результаты обычного поиска.`,
+          fallback: true,
+        };
+      }
+    };
+
+    run()
+      .then((result) => {
         if (!cancelled) {
-          if (import.meta.env.DEV) {
-            console.info("[Интеллекта][semantic-search] Книги загружены из Supabase", { count: books.length });
-          }
-          setCatalogBooks(books);
+          setList(result.list);
+          setNotice(result.notice);
+          setFallbackUsed(result.fallback);
         }
       })
-      .catch((err) => {
-        console.error("[Интеллекта][semantic-search] load:error", err);
-        if (!cancelled) setCatalogBooks([]);
+      .catch((error) => {
+        console.error("[Интеллекта][search] load:error", error);
+        if (!cancelled) {
+          setList([]);
+          setNotice("Не удалось выполнить поиск. Проверьте подключение к Supabase и Vercel Function.");
+          setFallbackUsed(true);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
     return () => { cancelled = true; };
-  }, [query]);
-
-  const qTopics = useMemo(() => deriveQueryTopics(query), [query]);
-
-  const results = useMemo(() => {
-    return catalogBooks
-      .filter((b) => b.isActive)
-      .map((b) => ({ book: b, ...scoreBook(b, query, qTopics) }))
-      .filter((r) => !query.trim() || r.score > 0.03)
-      .sort((a, b) => b.score - a.score);
-  }, [catalogBooks, query, qTopics]);
-
-  const fallbackResults = useMemo(
-    () => catalogBooks.slice(0, 6).map((b) => ({ book: b, score: 0, matched: [] as string[] })),
-    [catalogBooks]
-  );
-
-  const list = aiAvailable ? results : fallbackResults;
+  }, [query, mode]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = draft.trim();
     setSearchQuery(trimmed);
-    setSearchParams({ q: trimmed });
+    setSearchParams({ q: trimmed, mode });
+  };
+
+  const changeMode = (nextMode: SearchMode) => {
+    setMode(nextMode);
+    if (query.trim()) setSearchParams({ q: query.trim(), mode: nextMode });
   };
 
   const sampleQueries = [
@@ -140,7 +157,7 @@ export function SemanticSearchPage() {
           items={[
             { label: "Главная", onClick: () => navigate("/") },
             { label: "Каталог", onClick: () => navigate("/catalog") },
-            { label: "Смысловой поиск" },
+            { label: "Поиск" },
           ]}
         />
       </div>
@@ -158,19 +175,19 @@ export function SemanticSearchPage() {
           className="inline-flex items-center gap-2 rounded-full px-3 py-1 mb-3"
           style={{ background: BRAND.beige, color: BRAND.darkSlate, fontSize: 12 }}
         >
-          <Sparkles size={14} /> Смысловой поиск
+          <Sparkles size={14} /> {mode === "semantic" ? "Смысловой поиск" : "Обычный поиск"}
         </div>
         <h1 className="font-serif text-balance" style={{ color: BRAND.navy, fontSize: 30, lineHeight: 1.2 }}>
           {query ? <>Результаты по запросу: «{query}»</> : "Найдите книгу по смыслу"}
         </h1>
-        <p style={{ color: BRAND.slate, marginTop: 8, maxWidth: 700, lineHeight: 1.6 }}>
-          Мы ищем не только точные слова, но и близкие темы, идеи и смысловые
-          связи. Каждый результат сопровождается объяснением, почему он подходит.
+        <p style={{ color: BRAND.slate, marginTop: 8, maxWidth: 760, lineHeight: 1.6 }}>
+          В режиме смыслового поиска запрос превращается в embedding, после чего Supabase
+          сравнивает его с embedding книг через pgvector и возвращает наиболее близкие результаты.
         </p>
       </header>
 
       <form onSubmit={submit} className="mb-5" role="search">
-        <label htmlFor="ss-q" className="sr-only">Смысловой поиск</label>
+        <label htmlFor="ss-q" className="sr-only">Поиск по каталогу</label>
         <div
           className="flex items-center gap-2 rounded-full pl-4 pr-2 py-2"
           style={{ background: "white", border: `1px solid ${BRAND.lightGray}`, boxShadow: "0 4px 16px rgba(26,43,60,0.04)" }}
@@ -192,13 +209,36 @@ export function SemanticSearchPage() {
             <Wand2 size={14} /> Найти
           </button>
         </div>
+
+        <div className="mt-3 flex items-center gap-2 flex-wrap" style={{ color: BRAND.slate, fontSize: 13 }}>
+          <span>Режим:</span>
+          <button
+            type="button"
+            onClick={() => changeMode("text")}
+            aria-pressed={mode === "text"}
+            className="rounded-full px-3 py-1"
+            style={{ background: mode === "text" ? BRAND.navy : BRAND.beige, color: mode === "text" ? "white" : BRAND.darkSlate }}
+          >
+            Обычный поиск
+          </button>
+          <button
+            type="button"
+            onClick={() => changeMode("semantic")}
+            aria-pressed={mode === "semantic"}
+            className="rounded-full px-3 py-1 inline-flex items-center gap-1.5"
+            style={{ background: mode === "semantic" ? BRAND.navy : BRAND.beige, color: mode === "semantic" ? "white" : BRAND.darkSlate }}
+          >
+            <Sparkles size={13} /> Смысловой поиск
+          </button>
+        </div>
+
         <div className="mt-3 flex items-center gap-2 flex-wrap" style={{ color: BRAND.slate, fontSize: 13 }}>
           <span>Примеры:</span>
           {sampleQueries.map((q) => (
             <button
               key={q}
               type="button"
-              onClick={() => { setDraft(q); setSearchQuery(q); setSearchParams({ q }); }}
+              onClick={() => { setDraft(q); setSearchQuery(q); setSearchParams({ q, mode }); }}
               className="rounded-full"
               style={{ background: BRAND.beige, color: BRAND.darkSlate, padding: "4px 10px", fontSize: 12 }}
             >
@@ -208,31 +248,24 @@ export function SemanticSearchPage() {
         </div>
       </form>
 
-      {!aiAvailable && (
+      {notice && (
         <div className="mb-5">
-          <Notice tone="warn" title="ИИ-поиск временно недоступен">
-            Мы показали результаты обычного поиска по названию, автору и описанию.
-            Смысловой поиск восстановится автоматически.
+          <Notice tone={fallbackUsed ? "warn" : "info"} title={fallbackUsed ? "Смысловой поиск временно недоступен" : "Информация о поиске"}>
+            {notice}
           </Notice>
         </div>
       )}
 
-      {aiAvailable && qTopics.length > 0 && (
+      {mode === "semantic" && !fallbackUsed && query.trim() && list.length > 0 && (
         <div
           className="rounded-xl border p-4 mb-6 flex items-start gap-3"
           style={{ background: "white", borderColor: BRAND.beige }}
         >
           <Sparkles size={18} style={{ color: BRAND.navy, marginTop: 2, flexShrink: 0 }} />
           <div>
-            <div style={{ color: BRAND.navy }}>Найдено по смысловому совпадению:</div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {qTopics.map((t) => (
-                <SemanticBadge key={t} tone="match">{t}</SemanticBadge>
-              ))}
-            </div>
-            <div style={{ color: BRAND.slate, fontSize: 13, marginTop: 8 }}>
-              Релевантность учитывает совпадение тем, эмоционального тона и
-              уровня сложности.
+            <div style={{ color: BRAND.navy }}>Результаты отсортированы по cosine similarity.</div>
+            <div style={{ color: BRAND.slate, fontSize: 13, marginTop: 6 }}>
+              На карточках показан процент совпадения и 1–3 причины подбора.
             </div>
           </div>
         </div>
@@ -249,34 +282,27 @@ export function SemanticSearchPage() {
           ) : list.length === 0 ? (
             <EmptyState
               title="Ничего не найдено"
-              text="Попробуйте переформулировать запрос — например, описать тему или настроение книги."
+              text="Попробуйте переформулировать запрос — например, описать тему, проблему или настроение книги."
               icon={<Search size={22} />}
             />
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
-              {list.map(({ book, score, matched }) => {
-                const reasons = matched.length > 0
-                  ? [`Совпадают темы: ${matched.slice(0, 3).join(", ")}`]
-                  : aiAvailable
-                  ? ["Совпадение по описанию книги"]
-                  : ["Совпадение по тексту книги"];
-                return (
-                  <BookCard
-                    key={book.id}
-                    book={book}
-                    isFav={favorites.includes(book.id)}
-                    favoriteDisabled={favoritePendingIds.includes(book.id)}
-                    cartDisabled={cartPendingBookIds.includes(book.id)}
-                    onToggleFav={() => toggleFav(book.id)}
-                    onAddToCart={() => addToCart(book.id)}
-                    onOpen={() => navigate(`/book/${book.slug || book.id}`)}
-                    score={aiAvailable && score > 0 ? score : undefined}
-                    matched={matched}
-                    reasons={aiAvailable && matched.length > 0 ? reasons : undefined}
-                    semanticHint={aiAvailable && matched.length > 0}
-                  />
-                );
-              })}
+              {list.map(({ book, score, matched, reasons }) => (
+                <BookCard
+                  key={book.id}
+                  book={book}
+                  isFav={favorites.includes(book.id)}
+                  favoriteDisabled={favoritePendingIds.includes(book.id)}
+                  cartDisabled={cartPendingBookIds.includes(book.id)}
+                  onToggleFav={() => toggleFav(book.id)}
+                  onAddToCart={() => addToCart(book.id)}
+                  onOpen={() => navigate(`/book/${book.slug || book.id}`)}
+                  score={mode === "semantic" && typeof score === "number" && score > 0 ? score : undefined}
+                  matched={matched}
+                  reasons={mode === "semantic" ? reasons : undefined}
+                  semanticHint={mode === "semantic" && !fallbackUsed}
+                />
+              ))}
             </div>
           )}
         </section>
@@ -294,9 +320,9 @@ export function SemanticSearchPage() {
             </div>
             <ol className="space-y-3" style={{ color: BRAND.charcoal, fontSize: 13, lineHeight: 1.5 }}>
               {[
-                "Анализируем запрос и выделяем ключевые смыслы",
-                "Сравниваем смысловые признаки книг",
-                "Показываем релевантные результаты с объяснением",
+                "Книга получает embedding после ИИ-анализа или backfill-скрипта",
+                "Запрос пользователя также превращается в embedding на сервере",
+                "RPC match_books_semantic ищет близкие книги через pgvector",
               ].map((s, i) => (
                 <li key={s} className="flex gap-3">
                   <span
@@ -314,8 +340,7 @@ export function SemanticSearchPage() {
               className="mt-4 pt-4 border-t"
               style={{ borderColor: BRAND.beige, color: BRAND.gray, fontSize: 12, lineHeight: 1.5 }}
             >
-              ИИ-подсказки носят вспомогательный характер. Они дополняют, но не
-              заменяют официальные описания книг.
+              OpenRouter API key и Supabase service role key используются только в серверных функциях и не попадают во frontend.
             </div>
           </div>
         </aside>

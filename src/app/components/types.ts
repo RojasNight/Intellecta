@@ -51,6 +51,12 @@ export interface BookAIProfileAnalysis {
   keywords: string[];
   complexity_level: number;
   emotional_tone: string;
+  embedding_model?: string | null;
+  embedding_dimension?: number | null;
+  embedding_updated_at?: string | null;
+  embedding_status?: "missing" | "ready" | "failed" | null;
+  embedding_error?: string | null;
+  has_embedding?: boolean;
   updated_at?: string;
   status?: BookAIProfileStatusValue;
 }
@@ -251,6 +257,38 @@ export interface Order {
   deliveryType: string;
   items: { bookId: string; title: string; qty: number; price: number }[];
   createdAt: string;
+}
+
+
+export type SemanticSearchReason = string;
+
+export interface SemanticSearchRequest {
+  query: string;
+  limit?: number;
+  minSimilarity?: number;
+  filters?: {
+    genreId?: string | null;
+    format?: "paper" | "ebook" | "audiobook" | Format | null;
+    minPrice?: number | null;
+    maxPrice?: number | null;
+  };
+}
+
+export interface SemanticSearchResult {
+  bookId: string;
+  book: Book;
+  similarity: number;
+  reasons: SemanticSearchReason[];
+  matchedTopics: string[];
+}
+
+export interface SemanticSearchResponse {
+  ok: boolean;
+  query: string;
+  mode: "semantic" | "text-fallback";
+  fallback?: boolean;
+  message?: string;
+  items: SemanticSearchResult[];
 }
 
 export type ViewName =

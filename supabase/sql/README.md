@@ -48,6 +48,7 @@
 21. `19_orders_rpc_rls.sql` — Stage 16: RLS для `orders`/`order_items`, RPC `create_order_from_cart(...)` и `admin_update_order_status(...)`.
 22. `20_ai_analysis_lifecycle.sql` — Stage 17: RLS/status baseline для `book_ai_profiles` и `ai_analysis_jobs`, read-only browser access, stale/running/ready/failed statuses.
 23. `21_user_events_rls.sql` — Stage 18: нормализация `book_view`, RLS для `user_events`, guest insert с `user_id is null`, запрет update/delete.
+24. `22_semantic_search_pgvector.sql` — Stage 19: pgvector, поля embedding в `book_ai_profiles`, индекс HNSW и RPC `match_books_semantic(...)`.
 
 ## Важные правила
 
@@ -217,3 +218,44 @@ limit 50;
 ```
 
 Важно: `event_payload` предназначен только для минимальных технических полей события. Email, телефон, адрес, токены, полный checkout contact и другие PII туда не пишутся.
+
+
+## Stage 19 проверки
+
+После запуска `22_semantic_search_pgvector.sql` проверьте смысловой поиск:
+
+1. В Supabase включено расширение pgvector (`vector` в schema `extensions`).
+2. В `public.book_ai_profiles` появились поля `embedding_model`, `embedding_dimension`, `embedding_updated_at`, `embedding_status`, `embedding_error`.
+3. В `public.book_ai_profiles.embedding` используется `vector(1536)` для модели `openai/text-embedding-3-small`.
+4. Создан индекс `book_ai_profiles_embedding_hnsw_idx`.
+5. Создана RPC-функция `public.match_books_semantic(...)`.
+6. Запустите `npm run semantic:backfill -- --limit=20` или ИИ-анализ книги из админки, чтобы заполнить embedding.
+7. Проверьте `/search` с запросом «книга о самоопределении в цифровом обществе».
+
+SQL-проверки:
+
+```sql
+select
+  count(*) as total_ai_profiles,
+  count(*) filter (where embedding is not null) as profiles_with_embedding
+from public.book_ai_profiles;
+
+select
+  book_id,
+  embedding_model,
+  embedding_dimension,
+  embedding_updated_at,
+  embedding is not null as has_embedding
+from public.book_ai_profiles
+order by embedding_updated_at desc nulls last
+limit 20;
+
+select
+  proname,
+  pg_get_function_arguments(oid) as arguments,
+  pg_get_function_result(oid) as returns
+from pg_proc
+where proname = 'match_books_semantic';
+```
+
+Важно: `OPENROUTER_API_KEY` и `SUPABASE_SERVICE_ROLE_KEY` используются только в Vercel Functions и локальном backfill-скрипте. Frontend не получает и не читает эти секреты.

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "semantic:backfill": "node scripts/backfill-book-embeddings.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

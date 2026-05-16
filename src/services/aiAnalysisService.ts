@@ -10,7 +10,13 @@ export interface BookAIProfile {
   keywords: string[];
   complexity_level: number;
   emotional_tone: string;
-  embedding?: number[] | null;
+  embedding?: null;
+  has_embedding?: boolean;
+  embedding_model?: string | null;
+  embedding_dimension?: number | null;
+  embedding_updated_at?: string | null;
+  embedding_status?: "missing" | "ready" | "failed" | null;
+  embedding_error?: string | null;
   updated_at?: string | null;
   status?: "ready" | "stale" | "running" | "failed";
 }

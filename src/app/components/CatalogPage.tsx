@@ -15,6 +15,7 @@ export function CatalogPage() {
   const navigate = useNavigate();
   const { toggleFav, favorites, favoritePendingIds, cartPendingBookIds, addToCart, setSearchQuery } = useAppContext();
   const [q, setQ] = useState("");
+  const [semanticSearchEnabled, setSemanticSearchEnabled] = useState(false);
   const [genre, setGenre] = useState<string[]>([]);
   const [topics, setTopics] = useState<string[]>([]);
   const [formats, setFormats] = useState<string[]>([]);
@@ -207,8 +208,15 @@ export function CatalogPage() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          const trimmed = q.trim();
+          if (semanticSearchEnabled && trimmed) {
+            setSearchQuery(trimmed);
+            void logSearch(trimmed);
+            navigate(`/search?q=${encodeURIComponent(trimmed)}&mode=semantic`);
+            return;
+          }
           triggerLoading();
-          if (q.trim()) void logSearch(q);
+          if (trimmed) void logSearch(trimmed);
         }}
         className="mb-5" role="search"
       >
@@ -230,14 +238,26 @@ export function CatalogPage() {
             </button>
           )}
         </div>
-        {q.trim().length > 3 && (
-          <div className="mt-2 inline-flex items-center gap-2" style={{ color: BRAND.slate, fontSize: 13 }}>
-            <Sparkles size={14} />
-            <button onClick={() => { setSearchQuery(q); void logSearch(q); navigate("/search"); }} type="button" style={{ color: BRAND.navy }}>
-              Найти «{q}» по смыслу →
+        <div className="mt-2 flex items-center gap-3 flex-wrap" style={{ color: BRAND.slate, fontSize: 13 }}>
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={semanticSearchEnabled}
+              onChange={(e) => setSemanticSearchEnabled(e.target.checked)}
+              style={{ accentColor: BRAND.navy }}
+            />
+            <span className="inline-flex items-center gap-1.5"><Sparkles size={14} /> Искать по смыслу</span>
+          </label>
+          {q.trim().length > 3 && (
+            <button
+              onClick={() => { setSearchQuery(q); void logSearch(q); navigate(`/search?q=${encodeURIComponent(q.trim())}&mode=semantic`); }}
+              type="button"
+              style={{ color: BRAND.navy }}
+            >
+              Открыть смысловой поиск →
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </form>
 
       <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
